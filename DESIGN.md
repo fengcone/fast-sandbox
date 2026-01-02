@@ -11,7 +11,7 @@
 - 单个 Agent Pod 可以 oversubscribe CPU，由 Controller 策略控制逻辑并发上限。
 - sandbox 容器在 Agent Pod 的网络下暴露端口，Controller 将 `<AgentPodIP:Port>` 返回给用户。
 - Operator 基于 controller-runtime 实现。
-- 不为 Agent 单独定义 CR，Agent 状态仅在 Controller 内存中维护（通过 RPC 心跳）。
+- 不为 Agent 单独定义 CR，Agent 状态仅在 Controller 内存中维护（通过 HTTP 周期同步，Controller 主动与 Agent 通信）。
 
 ## 2. 总体架构
 
@@ -34,11 +34,11 @@
    - sandbox 容器：
      - 使用当前 Pod 的 cgroup（或其子层级）和 network namespace。
      - 在 kubelet 看来只是 Pod 内多了一些进程，资源都计入该 Pod，不产生额外 Pod/容器对象负担。
-   - Agent 周期性向 Controller 上报：
-     - Pod/Node 信息（PodName/PodIP/NodeName）。
-     - 逻辑 capacity / 当前运行 sandbox 数。
-     - 当前 node 已有镜像列表。
-
+   - Controller 周期性或事件驱动地向 Agent 发送 Sandboxes 请求：
+     - 请求体携带该 Agent 的期望 sandbox 列表（Desired State）。
+     - 响应体携带当前运行 sandbox 状态、镜像列表、capacity 等（Observed State）。
+   - Agent 不再主动向 Controller 发送心跳，只通过 HTTP 响应回报状态。
+   
 3. **用户 / RL 系统**
    - 通过创建 `SandboxClaim` CR 来声明需要一个 sandbox。
    - 读取 `SandboxClaim.status.address` 获取 `<AgentPodIP:Port>`，通过该地址与 sandbox 通信（HTTP/gRPC 等）。
@@ -80,17 +80,15 @@ Controller 作为 Operator，使用 controller-runtime 管理 Reconciler 和 cli
 
 职责：
 - Watch `SandboxClaim`，根据 `spec` 和当前 Agent 状态执行：
-  - Pending -> Scheduling：调用 Scheduler 选择合适 Agent。
-  - Scheduling -> Allocating：通过 RPC 调用 Agent 创建 sandbox。
-  - Allocating -> Running：写回 sandboxID 和 address。
-  - TTL 到期或用户删除时触发回收流程，调用 Agent 销毁 sandbox。
+  - Pending -> Scheduling：调用 Scheduler 选择合适 Agent，写入 `assignedAgentPod`，表示期望该 Agent 承载此 sandbox。
+  - Scheduling -> Running：由 Controller 的 AgentControlLoop 通过 Sandboxes 同步协议驱动，Agent 创建/更新实际容器后回报状态，Reconciler 将 `SandboxClaim.status` 更新为 Running。
+  - TTL 到期或用户删除时触发回收流程，在期望状态中移除对应 sandbox，Agent 随后清理容器。
 
 主要状态流转：
 1. `Pending`：新建的 SandboxClaim，等待调度。
-2. `Scheduling`：已开始调度，正在选择 Agent。
-3. `Allocating`：已分配 Agent，正在创建 sandbox 容器。
-4. `Running`：sandbox 已创建并可用。
-5. `Failed/Succeeded/Expired`：终态，记录原因或 TTL 到期。
+2. `Scheduling`：已分配 Agent，等待 Agent 根据期望状态拉起 sandbox。
+3. `Running`：sandbox 已创建并可用。
+4. `Failed/Succeeded/Expired`：终态，记录原因或 TTL 到期。
 
 ### 4.2 AgentRegistry（内存结构）
 
@@ -102,14 +100,14 @@ Controller 作为 Operator，使用 controller-runtime 管理 Reconciler 和 cli
   - `NodeName`
   - `Capacity`：逻辑最大可承载 sandbox 数，允许 oversubscribe 算法设定。
   - `Allocated`：当前已分配 sandbox 数。
-  - `Images`：该节点已有镜像列表（由 Agent 上报）。
-  - `LastHeartbeat`：最近心跳时间。
+  - `Images`：该节点已有镜像列表（由 Agent 返回或同步）。
+  - `LastSync`：最近一次与 Agent 成功同步 Sandboxes 的时间（实现上可复用 LastHeartbeat 字段）。
 - 提供接口：
   - 注册/更新 Agent。
   - 查询所有/单个 Agent。
   - 按 image 查询支持该镜像的 Agent。
   - 分配/释放 slot（更新 Allocated）。
-- 定期清理心跳超时的 Agent，将其从调度池中剔除。
+- 定期清理长时间未响应 Sandboxes 请求的 Agent，将其从调度池中剔除。
 
 ### 4.3 Image 索引
 
@@ -141,6 +139,14 @@ Controller 作为 Operator，使用 controller-runtime 管理 Reconciler 和 cli
   - 缩减长期闲置的 Agent Pod。
 - 使用 controller-runtime Client 直接创建/更新对应的 Deployment 或 Pod 对象。
 
+### 4.6 AgentControlLoop（Sandboxes 同步）
+
+- 作为 Controller 内部的控制循环，对每个 Agent 周期性或事件驱动地执行：
+  - 从 `SandboxClaim` 中收集该 Agent 的期望 sandboxes 列表（`assignedAgentPod` 为该 Agent）。
+  - 通过 HTTP 调用 Agent 的 `/api/v1/agent/sandboxes`，发送期望 sandboxes（Desired State）。
+  - 根据返回的 `sandboxesStatus` 更新对应 `SandboxClaim.status`，并刷新 AgentRegistry 中的 capacity、runningSandboxCount、images 以及最近同步时间。
+- 可结合 workqueue，在 `SandboxClaim` 或 Agent 状态变化时立即触发同步；同时保留低频全量同步作为兜底，增强鲁棒性。
+
 ## 5. Agent 设计
 
 Agent 运行在预先调度好的 Pod 内，负责与 containerd 交互并执行 Controller 的指令。
@@ -155,26 +161,20 @@ Agent 运行在预先调度好的 Pod 内，负责与 containerd 交互并执行
 ### 5.2 Agent 主流程
 
 1. 启动时读取配置：
-   - `POD_NAME`、`POD_NAMESPACE`、`NODE_NAME` 等。
-   - `CONTROLLER_ADDR`：Controller 的 RPC 地址。
+   - `POD_NAME`、`POD_NAMESPACE`、`NODE_NAME` 等（用于标识自身）。
    - 每个 sandbox 默认资源和最大并发 slot 策略。
 2. 初始化：
    - containerd client。
    - SandboxManager：封装 sandbox 容器的创建/销毁逻辑。
-   - ControllerClient：封装与 Controller 的 RPC 通信。
-3. 注册：
-   - 调用 Controller 的 `Register` RPC 上报：
-     - AgentID（可以由 Agent 自生成）。
-     - PodName/PodIP/NodeName。
-     - 初始 Capacity 和当前镜像列表。
-4. 心跳：
-   - 周期性发送 `Heartbeat` RPC：
-     - 当前运行中的 sandbox 数。
-     - 镜像列表（如有变化）。
-5. 接收创建/销毁 sandbox 指令：
-   - 暴露 http Server 给 Controller：
-     - `CreateSandbox`：根据参数创建 sandbox 容器。
-     - `DestroySandbox`：销毁指定 sandbox。
+   - HTTP Server：暴露 `/api/v1/agent/sandboxes` 等接口给 Controller 调用。
+3. 接收 Controller 的 Sandboxes 请求：
+   - 对比请求中的期望 sandboxes 列表与本地实际运行的 sandbox 集合。
+   - 对于需要新增的 sandbox：创建容器并加入当前 Pod 的 cgroup/netns。
+   - 对于需要删除的 sandbox：停止并删除容器。
+   - 汇总当前所有 sandbox 的状态、镜像列表、capacity 等，返回给 Controller。
+4. （可选）本地 TTL 与清理：
+   - 根据每个 sandbox 的 `ttlSeconds` 或内部策略执行超时清理。
+   - 将过期/失败信息反映在返回的 `sandboxesStatus` 中。
 
 ### 5.3 SandboxManager 与 containerd 集成
 
@@ -187,21 +187,20 @@ Agent 运行在预先调度好的 Pod 内，负责与 containerd 交互并执行
 - 内部维护 `sandboxID -> metadata` 映射：
   - 包含容器 ID、PID、监听端口、关联的 SandboxClaim UID 等。
 
-## 6. Controller <-> Agent RPC 协议（概念）
+## 6. Controller <-> Agent HTTP 协议（概念）
 
-Controller 与 Agent 通过 http 通信
+Controller 与 Agent 通过 HTTP 通信，以“期望/实际状态”对齐为核心：
 
-- `Register(RegisterRequest) -> RegisterResponse`
-  - Agent 上报自身信息和初始状态，Controller 在内存中注册 Agent。
-- `Heartbeat(HeartbeatRequest) -> HeartbeatResponse`
-  - Agent 周期性上报当前运行 sandbox 数、镜像列表等。
-- `CreateSandbox(CreateSandboxRequest) -> CreateSandboxResponse`
-  - Controller 在调度后调用该 RPC 请求 Agent 创建 sandbox 容器。
-  - 返回 `sandbox_id` 和实际监听的 `port`。
-- `DestroySandbox(DestroySandboxRequest) -> DestroySandboxResponse`
-  - Controller 请求销毁一个 sandbox。
+- `POST /api/v1/agent/sandboxes`
+  - **方向**：Controller -> Agent。
+  - **Request**：包含该 Agent 的期望 sandbox 列表（Desired State），以及可选的 fullSync 标志。
+  - **Response**：返回当前运行的 sandbox 状态列表、Agent 的 capacity、runningSandboxCount、images 等（Observed State）。
+- （可选）首次启动或 Controller 重启时，可以发送空的期望列表，仅用于拉取 Agent 当前状态（同步现状）。
 
-Controller 在成功调用 `CreateSandbox` 后，将：
+Controller 在收到 `sandboxesStatus` 后，将：
+- 使用 Agent 的 PodIP 和返回的 `port` 构造 `<AgentPodIP:Port>`。
+- 写入对应 `SandboxClaim` 的 `status.address` 和 `status.sandboxID` 等字段。
+- 更新 AgentRegistry 中该 Agent 的 images/capacity/最近同步时间。
 - 使用 Agent 的 PodIP（来自 AgentRegistry）和返回的 `port` 构造 `<AgentPodIP:Port>`。
 - 写入 SandboxClaim 的 `status.address`，供用户侧使用。
 
@@ -224,17 +223,18 @@ fast-sandbox/
         scheduler.go              # 调度逻辑
         policy.go                 # 打分/oversubscribe 策略
       agentpool/
-        registry.go               # AgentRegistry & image index
-        heartbeat.go              # 心跳清理等
+        registry.go               # AgentRegistry & image index（含最近同步时间）
+      agentclient/
+        client.go                 # Controller 侧调用 Agent 的 HTTP Sandboxes 接口
+      agentserver/
+        server.go                 # Controller 侧接收 Agent 上报（如注册/兼容用途）
     agent/
       runtime/
         sandbox_manager.go        # sandbox 生命周期 & containerd 集成
         containerd_client.go      # containerd client 封装
         cgroup_netns.go           # cgroup/netns 处理
-      client/
-        controller_client.go      # 调用 Controller 的 RPC 客户端
       server/
-        rpc_server.go             # Agent 暴露的 http Server
+        rpc_server.go             # Agent 暴露的 HTTP Sandboxes 接口
   config/
     crd/
     rbac/

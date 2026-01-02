@@ -66,6 +66,14 @@ func main() {
 			_, err := ctrlClient.Heartbeat(heartbeatReq)
 			if err != nil {
 				log.Printf("Heartbeat failed: %v", err)
+				// 如果心跳失败（可能是 Controller 重启），尝试重新注册
+				log.Println("Attempting to re-register agent...")
+				regResp, regErr := ctrlClient.Register(registerReq)
+				if regErr != nil {
+					log.Printf("Re-registration failed: %v", regErr)
+				} else {
+					log.Printf("Re-registration successful: %s", regResp.Message)
+				}
 			} else {
 				log.Println("Heartbeat sent successfully")
 			}
