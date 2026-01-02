@@ -49,6 +49,13 @@ spec:
               port:
                 type: integer
                 format: int32
+              poolRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
           status:
             type: object
             properties:

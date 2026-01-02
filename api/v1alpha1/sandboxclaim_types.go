@@ -13,6 +13,12 @@ var (
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
+// PoolReference optionally selects a SandboxPool for this claim.
+type PoolReference struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // SandboxClaimSpec defines the desired state of SandboxClaim.
 type SandboxClaimSpec struct {
 	Image      string            `json:"image"`
@@ -23,6 +29,7 @@ type SandboxClaimSpec struct {
 	Args       []string          `json:"args,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
 	Port       int32             `json:"port,omitempty"`
+	PoolRef    *PoolReference    `json:"poolRef,omitempty"`
 }
 
 // SandboxClaimStatus defines the observed state of SandboxClaim.

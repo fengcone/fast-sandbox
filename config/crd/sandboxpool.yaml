@@ -1,0 +1,98 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sandboxpools.sandbox.fast.io
+spec:
+  group: sandbox.fast.io
+  names:
+    kind: SandboxPool
+    listKind: SandboxPoolList
+    plural: sandboxpools
+    singular: sandboxpool
+    shortNames:
+      - sbp
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                capacity:
+                  type: object
+                  properties:
+                    poolMin:
+                      type: integer
+                      format: int32
+                    poolMax:
+                      type: integer
+                      format: int32
+                    bufferMin:
+                      type: integer
+                      format: int32
+                    bufferMax:
+                      type: integer
+                      format: int32
+                agentTemplate:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                currentPods:
+                  type: integer
+                  format: int32
+                readyPods:
+                  type: integer
+                  format: int32
+                totalAgents:
+                  type: integer
+                  format: int32
+                idleAgents:
+                  type: integer
+                  format: int32
+                busyAgents:
+                  type: integer
+                  format: int32
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: CurrentPods
+          type: integer
+          jsonPath: .status.currentPods
+        - name: ReadyPods
+          type: integer
+          jsonPath: .status.readyPods
+        - name: IdleAgents
+          type: integer
+          jsonPath: .status.idleAgents
+        - name: BusyAgents
+          type: integer
+          jsonPath: .status.busyAgents
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

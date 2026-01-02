@@ -15,6 +15,7 @@ type AgentInfo struct {
 	PodName       string
 	PodIP         string
 	NodeName      string
+	PoolName      string
 	Capacity      int
 	Allocated     int
 	Images        []string

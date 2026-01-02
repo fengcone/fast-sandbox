@@ -1,0 +1,75 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+)
+
+// SandboxPoolSpec defines the desired state of SandboxPool.
+type SandboxPoolSpec struct {
+	Capacity      PoolCapacity           `json:"capacity"`
+	AgentTemplate corev1.PodTemplateSpec `json:"agentTemplate"`
+}
+
+// PoolCapacity describes the sizing policy of the agent pool.
+type PoolCapacity struct {
+	PoolMin   int32 `json:"poolMin"`
+	PoolMax   int32 `json:"poolMax"`
+	BufferMin int32 `json:"bufferMin"`
+	BufferMax int32 `json:"bufferMax"`
+}
+
+// SandboxPoolStatus defines the observed state of SandboxPool.
+type SandboxPoolStatus struct {
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	CurrentPods        int32              `json:"currentPods,omitempty"`
+	ReadyPods          int32              `json:"readyPods,omitempty"`
+	TotalAgents        int32              `json:"totalAgents,omitempty"`
+	IdleAgents         int32              `json:"idleAgents,omitempty"`
+	BusyAgents         int32              `json:"busyAgents,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+
+// SandboxPool is the Schema for the sandboxpools API.
+type SandboxPool struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   SandboxPoolSpec   `json:"spec,omitempty"`
+	Status SandboxPoolStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// SandboxPoolList contains a list of SandboxPool.
+type SandboxPoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []SandboxPool `json:"items"`
+}
+
+func (in *SandboxPool) DeepCopyObject() runtime.Object {
+	if in == nil {
+		return nil
+	}
+	out := new(SandboxPool)
+	*out = *in
+	return out
+}
+
+func (in *SandboxPoolList) DeepCopyObject() runtime.Object {
+	if in == nil {
+		return nil
+	}
+	out := new(SandboxPoolList)
+	*out = *in
+	return out
+}
+
+func init() {
+	SchemeBuilder.Register(&SandboxPool{}, &SandboxPoolList{})
+}

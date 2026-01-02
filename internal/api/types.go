@@ -65,6 +65,44 @@ type DestroySandboxResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+// SandboxDesired describes the desired state of a sandbox on an agent.
+type SandboxDesired struct {
+	SandboxID string            `json:"sandboxId"`
+	ClaimUID  string            `json:"claimUid"`
+	ClaimName string            `json:"claimName"`
+	Image     string            `json:"image"`
+	CPU       string            `json:"cpu,omitempty"`
+	Memory    string            `json:"memory,omitempty"`
+	Port      int32             `json:"port,omitempty"`
+	Command   []string          `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// SandboxStatus represents the observed state of a sandbox on an agent.
+type SandboxStatus struct {
+	SandboxID string `json:"sandboxId"`
+	ClaimUID  string `json:"claimUid"`
+	Phase     string `json:"phase"`
+	Message   string `json:"message,omitempty"`
+	Port      int32  `json:"port,omitempty"`
+}
+
+// SandboxesRequest is sent by Controller to Agent with desired sandboxes.
+type SandboxesRequest struct {
+	AgentID   string           `json:"agentId"`
+	Sandboxes []SandboxDesired `json:"sandboxes"`
+}
+
+// SandboxesResponse is returned by Agent with current sandbox statuses and agent summary.
+type SandboxesResponse struct {
+	AgentID             string           `json:"agentId"`
+	Capacity            int              `json:"capacity"`
+	RunningSandboxCount int              `json:"runningSandboxCount"`
+	Images              []string         `json:"images,omitempty"`
+	Sandboxes           []SandboxStatus  `json:"sandboxes"`
+}
+
 // AgentStatus represents the current status of an agent (internal use).
 type AgentStatus struct {
 	AgentID       string    `json:"agentId"`

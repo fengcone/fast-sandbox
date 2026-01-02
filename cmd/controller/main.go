@@ -15,6 +15,7 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller"
 	"fast-sandbox/internal/controller/agentclient"
+	"fast-sandbox/internal/controller/agentcontrol"
 	"fast-sandbox/internal/controller/agentpool"
 	"fast-sandbox/internal/controller/agentserver"
 	"fast-sandbox/internal/controller/scheduler"
@@ -60,16 +61,29 @@ func main() {
 	}()
 
 	if err = (&controller.SandboxClaimReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Ctx:         context.Background(),
-		Registry:    reg,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Ctx:      context.Background(),
+		Registry: reg,
 		Scheduler:   sched,
-		AgentClient: agentHTTPClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SandboxClaim")
 		os.Exit(1)
 	}
+
+	if err = (&controller.SandboxPoolReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Registry: reg,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SandboxPool")
+		os.Exit(1)
+	}
+
+	// 启动 AgentControlLoop
+	ctx := ctrl.SetupSignalHandler()
+	loop := agentcontrol.NewLoop(mgr.GetClient(), reg, agentHTTPClient)
+	go loop.Start(ctx)
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
@@ -81,7 +95,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"fast-sandbox/internal/api"
@@ -47,13 +48,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Derive pool name from PodName (assumes PodName has prefix '<pool>-agent-')
+	poolName := ""
+	if parts := strings.Split(req.PodName, "-agent-"); len(parts) > 1 {
+		poolName = parts[0]
+	}
+
 	// Register agent in memory
 	info := agentpool.AgentInfo{
-		ID:            agentpool.AgentID(req.AgentID),
+		ID:            agentpool.AgentID(req.PodName),
 		Namespace:     req.Namespace,
 		PodName:       req.PodName,
 		PodIP:         req.PodIP,
 		NodeName:      req.NodeName,
+		PoolName:      poolName,
 		Capacity:      req.Capacity,
 		Allocated:     0,
 		Images:        req.Images,

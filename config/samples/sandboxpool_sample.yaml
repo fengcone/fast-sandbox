@@ -1,0 +1,30 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxPool
+metadata:
+  name: test-sandbox-pool
+  namespace: default
+spec:
+  capacity:
+    poolMin: 2
+    poolMax: 5
+    bufferMin: 1
+    bufferMax: 3
+  agentTemplate:
+    metadata:
+      labels:
+        app: sandbox-agent
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: agent
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+      restartPolicy: Always

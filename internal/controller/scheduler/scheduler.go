@@ -27,6 +27,25 @@ func (s *SimpleScheduler) Schedule(ctx context.Context, claim *apiv1alpha1.Sandb
 	bestScore := -1
 
 	image := claim.Spec.Image
+
+	// Optional poolRef filtering
+	if claim.Spec.PoolRef != nil {
+		poolName := claim.Spec.PoolRef.Name
+		poolNs := claim.Spec.PoolRef.Namespace
+
+		filtered := make([]agentpool.AgentInfo, 0, len(agents))
+		for _, a := range agents {
+			if a.PoolName != poolName {
+				continue
+			}
+			if poolNs != "" && a.Namespace != poolNs {
+				continue
+			}
+			filtered = append(filtered, a)
+		}
+		agents = filtered
+	}
+
 	for _, a := range agents {
 		free := a.Capacity - a.Allocated
 		if free <= 0 {
