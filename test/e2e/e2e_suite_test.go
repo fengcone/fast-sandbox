@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,25 +43,18 @@ var _ = BeforeSuite(func() {
 
 	ctx, cancel = context.WithCancel(context.Background())
 
-	By("Building and loading Agent image")
-	err := buildAndLoadAgentImage()
-	Expect(err).NotTo(HaveOccurred())
-
-	By("Building and loading Controller image")
-	err = buildAndLoadControllerImage()
-	Expect(err).NotTo(HaveOccurred())
-
 	By("bootstrapping test environment")
 
 	// 使用真实的 Kubernetes 集群（KIND）而不是 envtest
 	// 这样可以测试真实的 Pod 创建、网络等功能
+	// 注意：镜像构建和加载已经在 make e2e-prepare 中完成
 	testEnv = &envtest.Environment{
 		UseExistingCluster: boolPtr(true),
 	}
 
-	var err2 error
-	cfg, err2 = testEnv.Start()
-	Expect(err2).NotTo(HaveOccurred())
+	var err error
+	cfg, err = testEnv.Start()
+	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
 	err = sandboxv1alpha1.AddToScheme(scheme.Scheme)
@@ -110,70 +102,6 @@ func getProjectRoot() (string, error) {
 		}
 		dir = parent
 	}
-}
-
-// buildAndLoadAgentImage 自动构建并加载 Agent 镜像到 KIND 集群
-func buildAndLoadAgentImage() error {
-	projectRoot, err := getProjectRoot()
-	if err != nil {
-		return fmt.Errorf("failed to get project root: %w", err)
-	}
-
-	GinkgoWriter.Printf("Project root: %s\n", projectRoot)
-
-	// 执行 make docker-agent
-	GinkgoWriter.Println("Building Agent image...")
-	cmd := exec.Command("make", "docker-agent", "AGENT_IMAGE=fast-sandbox-agent:dev")
-	cmd.Dir = projectRoot
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to build agent image: %w", err)
-	}
-
-	// 执行 make kind-load-agent
-	GinkgoWriter.Println("Loading Agent image to KIND cluster...")
-	cmd = exec.Command("make", "kind-load-agent", "AGENT_IMAGE=fast-sandbox-agent:dev")
-	cmd.Dir = projectRoot
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to load agent image: %w", err)
-	}
-
-	GinkgoWriter.Println("Agent image built and loaded successfully")
-	return nil
-}
-
-// buildAndLoadControllerImage 自动构建并加载 Controller 镜像到 KIND 集群
-func buildAndLoadControllerImage() error {
-	projectRoot, err := getProjectRoot()
-	if err != nil {
-		return fmt.Errorf("failed to get project root: %w", err)
-	}
-
-	// 执行 make docker-controller
-	GinkgoWriter.Println("Building Controller image...")
-	cmd := exec.Command("make", "docker-controller", "CONTROLLER_IMAGE=fast-sandbox/controller:dev")
-	cmd.Dir = projectRoot
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to build controller image: %w", err)
-	}
-
-	// 执行 make kind-load-controller
-	GinkgoWriter.Println("Loading Controller image to KIND cluster...")
-	cmd = exec.Command("make", "kind-load-controller", "CONTROLLER_IMAGE=fast-sandbox/controller:dev")
-	cmd.Dir = projectRoot
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to load controller image: %w", err)
-	}
-
-	GinkgoWriter.Println("Controller image built and loaded successfully")
-	return nil
 }
 
 // deployControllerToCluster 部署 Controller 到集群

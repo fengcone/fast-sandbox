@@ -7,7 +7,7 @@ CONTROLLER_IMAGE ?= $(REGISTRY)/controller:dev
 GO ?= go
 GOFLAGS ?=
 
-.PHONY: all build build-controller build-agent build-agent-linux build-controller-linux test tidy e2e docker-agent docker-controller kind-load-agent kind-load-controller help
+.PHONY: all build build-controller build-agent build-agent-linux build-controller-linux test tidy e2e e2e-prepare docker-agent docker-controller kind-load-agent kind-load-controller help
 
 all: build
 
@@ -64,9 +64,19 @@ kind-load-agent:
 kind-load-controller:
 	kind load docker-image $(CONTROLLER_IMAGE) --name fast-sandbox || echo "kind cluster 'fast-sandbox' not found or kind not installed"
 
-# Placeholder for end-to-end tests; to be implemented later
-# Can be wired to run controller in cluster, apply CRDs, and validate behavior.
-e2e:
+# Prepare e2e test environment: build and load images to KIND cluster
+e2e-prepare:
+	@echo "Preparing e2e test environment..."
+	@echo "Building and loading Agent image..."
+	@$(MAKE) docker-agent AGENT_IMAGE=fast-sandbox-agent:dev
+	@$(MAKE) kind-load-agent AGENT_IMAGE=fast-sandbox-agent:dev
+	@echo "Building and loading Controller image..."
+	@$(MAKE) docker-controller CONTROLLER_IMAGE=fast-sandbox/controller:dev
+	@$(MAKE) kind-load-controller CONTROLLER_IMAGE=fast-sandbox/controller:dev
+	@echo "E2E test environment prepared successfully"
+
+# Run Ginkgo e2e tests (automatically builds and loads images first)
+e2e: e2e-prepare
 	@echo "Running Ginkgo e2e tests..."
 	go test -v ./test/e2e/... -ginkgo.v
 
