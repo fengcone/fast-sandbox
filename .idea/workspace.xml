@@ -14,6 +14,10 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="KubernetesApiPersistence"><![CDATA[{}]]></component>
+  <component name="KubernetesApiProvider"><![CDATA[{
+  "isMigrated": true
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 2
 }</component>
@@ -24,8 +28,10 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "Go Build.controller.executor": "Debug",
     "Go Build.go build fast-sandbox/cmd/agent.executor": "Debug",
     "Go Build.go build fast-sandbox/cmd/controller.executor": "Debug",
+    "Go Remote.agent-debug.executor": "Debug",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
@@ -50,7 +56,16 @@
     ]
   }
 }]]></component>
-  <component name="RunManager" selected="Go Build.go build fast-sandbox/cmd/controller">
+  <component name="RunManager" selected="Go Build.controller">
+    <configuration name="controller" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true">
+      <module name="fast-sandbox" />
+      <working_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="fast-sandbox/cmd/controller" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$/cmd/controller/main.go" />
+      <method v="2" />
+    </configuration>
     <configuration name="go build fast-sandbox/cmd/agent" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true" nameIsGenerated="true">
       <module name="fast-sandbox" />
       <working_directory value="$PROJECT_DIR$" />
@@ -60,18 +75,18 @@
       <filePath value="$PROJECT_DIR$/cmd/agent/main.go" />
       <method v="2" />
     </configuration>
-    <configuration name="go build fast-sandbox/cmd/controller" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true" nameIsGenerated="true">
-      <module name="fast-sandbox" />
-      <working_directory value="$PROJECT_DIR$" />
-      <kind value="PACKAGE" />
-      <package value="fast-sandbox/cmd/controller" />
-      <directory value="$PROJECT_DIR$" />
-      <filePath value="$PROJECT_DIR$/cmd/controller/main.go" />
+    <configuration name="agent-debug" type="GoRemoteDebugConfigurationType" factoryName="Go Remote">
+      <option name="disconnectOption" value="ASK" />
       <method v="2" />
     </configuration>
+    <list>
+      <item itemvalue="Go Build.go build fast-sandbox/cmd/agent" />
+      <item itemvalue="Go Build.controller" />
+      <item itemvalue="Go Remote.agent-debug" />
+    </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Go Build.go build fast-sandbox/cmd/controller" />
+        <item itemvalue="Go Build.controller" />
         <item itemvalue="Go Build.go build fast-sandbox/cmd/agent" />
       </list>
     </recent_temporary>
@@ -96,13 +111,46 @@
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="UnknownFeatures">
+    <option featureType="com.intellij.fileTypeFactory" implementationName="*.agent" />
+  </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="DlvLineBreakpoint">
-          <url>file://$PROJECT_DIR$/cmd/controller/main.go</url>
-          <line>33</line>
-          <option name="timeStamp" value="1" />
+          <url>file://$PROJECT_DIR$/cmd/agent/main.go</url>
+          <line>10</line>
+          <option name="timeStamp" value="3" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/agent/server/rpc_server.go</url>
+          <line>36</line>
+          <option name="timeStamp" value="4" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/agent/server/rpc_server.go</url>
+          <line>76</line>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/controller/sandboxpool_controller.go</url>
+          <line>26</line>
+          <option name="timeStamp" value="6" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/controller/agentcontrol/loop.go</url>
+          <line>56</line>
+          <option name="timeStamp" value="8" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/controller/agentcontrol/loop.go</url>
+          <line>103</line>
+          <option name="timeStamp" value="9" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/internal/controller/agentclient/client.go</url>
+          <line>28</line>
+          <option name="timeStamp" value="10" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

@@ -40,6 +40,43 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	currentPods := int32(len(podList.Items))
 
+	// Register Running and Ready Agent Pods to AgentRegistry
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		// Check if Pod is Ready
+		isReady := false
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				isReady = true
+				break
+			}
+		}
+		if !isReady {
+			continue
+		}
+
+		// Register to AgentRegistry if not already registered
+		agentID := agentpool.AgentID(pod.Name)
+		if _, exists := r.Registry.GetAgentByID(agentID); !exists {
+			agentInfo := agentpool.AgentInfo{
+				ID:        agentID,
+				PodName:   pod.Name,
+				PodIP:     pod.Status.PodIP,
+				NodeName:  pod.Spec.NodeName,
+				Namespace: pod.Namespace,
+				PoolName:  pool.Name,
+				Capacity:  10, // 默认容量
+				Allocated: 0,
+				Images:    []string{}, // TODO: 从 Agent 获取镜像列表
+			}
+			r.Registry.RegisterOrUpdate(agentInfo)
+			logger.Info("Registered Agent to Registry", "agentID", agentID, "podIP", pod.Status.PodIP)
+		}
+	}
+
 	// Derive agent stats from registry, only counting agents belonging to this pool
 	agents := r.Registry.GetAllAgents()
 	var totalAgents, idleAgents, busyAgents int32

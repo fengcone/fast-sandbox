@@ -17,9 +17,32 @@ spec:
       serviceAccountName: default
       containers:
         - name: agent
-          image: busybox
+          image: fast-sandbox-agent:dev
           imagePullPolicy: IfNotPresent
-          command: ["sh", "-c", "sleep 3600"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: agent-http
+              containerPort: 8081
+              protocol: TCP
+            - name: dlv-debug
+              containerPort: 2345
+              protocol: TCP
           resources:
             requests:
               cpu: "100m"

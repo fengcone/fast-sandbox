@@ -96,11 +96,11 @@ type SandboxesRequest struct {
 
 // SandboxesResponse is returned by Agent with current sandbox statuses and agent summary.
 type SandboxesResponse struct {
-	AgentID             string           `json:"agentId"`
-	Capacity            int              `json:"capacity"`
-	RunningSandboxCount int              `json:"runningSandboxCount"`
-	Images              []string         `json:"images,omitempty"`
-	Sandboxes           []SandboxStatus  `json:"sandboxes"`
+	AgentID             string          `json:"agentId"`
+	Capacity            int             `json:"capacity"`
+	RunningSandboxCount int             `json:"runningSandboxCount"`
+	Images              []string        `json:"images,omitempty"`
+	Sandboxes           []SandboxStatus `json:"sandboxes"`
 }
 
 // AgentStatus represents the current status of an agent (internal use).

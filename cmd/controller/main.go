@@ -47,8 +47,6 @@ func main() {
 	}
 
 	reg := agentpool.NewInMemoryRegistry()
-	// 注入测试 Agent（后续移除，改为真实 Agent 注册）
-	agentpool.InjectTestAgent(reg)
 	sched := scheduler.NewSimpleScheduler()
 	agentHTTPClient := agentclient.NewAgentClient()
 
@@ -61,11 +59,11 @@ func main() {
 	}()
 
 	if err = (&controller.SandboxClaimReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Ctx:      context.Background(),
-		Registry: reg,
-		Scheduler:   sched,
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Ctx:       context.Background(),
+		Registry:  reg,
+		Scheduler: sched,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SandboxClaim")
 		os.Exit(1)
