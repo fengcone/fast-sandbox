@@ -64,95 +64,10 @@ var _ = Describe("SandboxClaim Scheduling", func() {
 
 	Context("When creating a SandboxPool", func() {
 		It("Should create Agent Pods successfully", func() {
-			By("Creating a SandboxPool")
-			sandboxPool = &sandboxv1alpha1.SandboxPool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      poolName,
-					Namespace: namespace,
-				},
-				Spec: sandboxv1alpha1.SandboxPoolSpec{
-					Capacity: sandboxv1alpha1.PoolCapacity{
-						PoolMin:   2,
-						PoolMax:   5,
-						BufferMin: 1,
-						BufferMax: 3,
-					},
-					AgentTemplate: corev1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels: map[string]string{
-								"app": "sandbox-agent",
-							},
-						},
-						Spec: corev1.PodSpec{
-							ServiceAccountName: "default",
-							Containers: []corev1.Container{
-								{
-									Name:            "agent",
-									Image:           "fast-sandbox-agent:dev",
-									ImagePullPolicy: corev1.PullIfNotPresent,
-									Env: []corev1.EnvVar{
-										{
-											Name: "POD_NAME",
-											ValueFrom: &corev1.EnvVarSource{
-												FieldRef: &corev1.ObjectFieldSelector{
-													FieldPath: "metadata.name",
-												},
-											},
-										},
-										{
-											Name: "POD_IP",
-											ValueFrom: &corev1.EnvVarSource{
-												FieldRef: &corev1.ObjectFieldSelector{
-													FieldPath: "status.podIP",
-												},
-											},
-										},
-										{
-											Name: "NODE_NAME",
-											ValueFrom: &corev1.EnvVarSource{
-												FieldRef: &corev1.ObjectFieldSelector{
-													FieldPath: "spec.nodeName",
-												},
-											},
-										},
-										{
-											Name: "NAMESPACE",
-											ValueFrom: &corev1.EnvVarSource{
-												FieldRef: &corev1.ObjectFieldSelector{
-													FieldPath: "metadata.namespace",
-												},
-											},
-										},
-									},
-									Ports: []corev1.ContainerPort{
-										{
-											Name:          "agent-http",
-											ContainerPort: 8081,
-											Protocol:      corev1.ProtocolTCP,
-										},
-										{
-											Name:          "dlv-debug",
-											ContainerPort: 2345,
-											Protocol:      corev1.ProtocolTCP,
-										},
-									},
-									Resources: corev1.ResourceRequirements{
-										Requests: corev1.ResourceList{
-											corev1.ResourceCPU:    mustParseQuantity("100m"),
-											corev1.ResourceMemory: mustParseQuantity("128Mi"),
-										},
-										Limits: corev1.ResourceList{
-											corev1.ResourceCPU:    mustParseQuantity("100m"),
-											corev1.ResourceMemory: mustParseQuantity("128Mi"),
-										},
-									},
-								},
-							},
-							RestartPolicy: corev1.RestartPolicyAlways,
-						},
-					},
-				},
-			}
+			By("Creating a SandboxPool from YAML")
+			sandboxPool = &sandboxv1alpha1.SandboxPool{}
+			err := LoadYAMLToObject("sandboxpool.yaml", sandboxPool)
+			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Create(ctx, sandboxPool)).Should(Succeed())
 
@@ -195,25 +110,15 @@ var _ = Describe("SandboxClaim Scheduling", func() {
 
 	Context("When creating a SandboxClaim with poolRef", func() {
 		BeforeEach(func() {
-			By("Creating a SandboxPool first")
-			sandboxPool = &sandboxv1alpha1.SandboxPool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      poolName,
-					Namespace: namespace,
-				},
-				Spec: sandboxv1alpha1.SandboxPoolSpec{
-					Capacity: sandboxv1alpha1.PoolCapacity{
-						PoolMin:   2,
-						PoolMax:   5,
-						BufferMin: 1,
-						BufferMax: 3,
-					},
-					AgentTemplate: createAgentPodTemplate(),
-				},
-			}
+			By("Creating a SandboxPool first from YAML")
+			sandboxPool = &sandboxv1alpha1.SandboxPool{}
+			err := LoadYAMLToObject("sandboxpool.yaml", sandboxPool)
+			Expect(err).NotTo(HaveOccurred())
+
 			Expect(k8sClient.Create(ctx, sandboxPool)).Should(Succeed())
 
 			// 等待 Agent Pods 就绪
+			GinkgoWriter.Println("Waiting for Agent Pods to be created and ready...")
 			Eventually(func() int {
 				podList := &corev1.PodList{}
 				k8sClient.List(ctx, podList,
@@ -223,31 +128,24 @@ var _ = Describe("SandboxClaim Scheduling", func() {
 				readyCount := 0
 				for _, pod := range podList.Items {
 					if isPodReady(&pod) {
+						GinkgoWriter.Printf("  Agent Pod Ready: %s\n", pod.Name)
 						readyCount++
 					}
 				}
+				GinkgoWriter.Printf("  Ready count: %d/2\n", readyCount)
 				return readyCount
 			}, timeout, interval).Should(BeNumerically(">=", 2))
+
+			// 额外等待一下，确保 Controller 已注册 Agents
+			GinkgoWriter.Println("Waiting a bit more to ensure Agents are registered...")
+			time.Sleep(3 * time.Second)
 		})
 
 		It("Should schedule to an Agent Pod from the specified pool", func() {
-			By("Creating a SandboxClaim with poolRef")
-			sandboxClaim = &sandboxv1alpha1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      claimName,
-					Namespace: namespace,
-				},
-				Spec: sandboxv1alpha1.SandboxClaimSpec{
-					Image:  "nginx:latest",
-					CPU:    "100m",
-					Memory: "128Mi",
-					Port:   8080,
-					PoolRef: &sandboxv1alpha1.PoolReference{
-						Name:      poolName,
-						Namespace: namespace,
-					},
-				},
-			}
+			By("Creating a SandboxClaim from YAML")
+			sandboxClaim = &sandboxv1alpha1.SandboxClaim{}
+			err := LoadYAMLToObject("sandboxclaim.yaml", sandboxClaim)
+			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Create(ctx, sandboxClaim)).Should(Succeed())
 
@@ -267,12 +165,30 @@ var _ = Describe("SandboxClaim Scheduling", func() {
 			Expect(k8sClient.Get(ctx, claimKey, claim)).Should(Succeed())
 			Expect(claim.Status.AssignedAgentPod).ShouldNot(BeEmpty())
 
-			// 验证分配的 Pod 属于指定的 Pool
 			assignedPodName := claim.Status.AssignedAgentPod
-			pod := &corev1.Pod{}
-			podKey := types.NamespacedName{Name: assignedPodName, Namespace: namespace}
-			Expect(k8sClient.Get(ctx, podKey, pod)).Should(Succeed())
-			Expect(pod.Labels["sandbox.fast.io/pool"]).Should(Equal(poolName))
+			GinkgoWriter.Printf("Assigned Agent Pod: %s\n", assignedPodName)
+
+			// 列出当前所有 Agent Pods
+			podList := &corev1.PodList{}
+			k8sClient.List(ctx, podList,
+				client.InNamespace(namespace),
+				client.MatchingLabels{"sandbox.fast.io/pool": poolName})
+			GinkgoWriter.Println("Current Agent Pods:")
+			for _, pod := range podList.Items {
+				GinkgoWriter.Printf("  - %s (Phase: %s, Ready: %v)\n", pod.Name, pod.Status.Phase, isPodReady(&pod))
+			}
+
+			// 验证分配的 Pod 属于指定的 Pool
+			// 注意：Agent Pod 可能刚创建不久，需要使用 Eventually
+			Eventually(func() bool {
+				pod := &corev1.Pod{}
+				podKey := types.NamespacedName{Name: assignedPodName, Namespace: namespace}
+				if err := k8sClient.Get(ctx, podKey, pod); err != nil {
+					GinkgoWriter.Printf("Failed to get pod %s: %v\n", assignedPodName, err)
+					return false
+				}
+				return pod.Labels["sandbox.fast.io/pool"] == poolName
+			}, timeout, interval).Should(BeTrue(), "Assigned Agent Pod should exist and belong to the pool")
 		})
 	})
 })

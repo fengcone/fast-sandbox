@@ -1,0 +1,13 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxClaim
+metadata:
+  name: test-claim-e2e
+  namespace: default
+spec:
+  image: nginx:latest
+  cpu: "100m"
+  memory: "128Mi"
+  port: 8080
+  poolRef:
+    name: test-sandbox-pool
+    namespace: default

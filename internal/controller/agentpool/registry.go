@@ -29,6 +29,7 @@ type AgentRegistry interface {
 	GetAgentByID(id AgentID) (AgentInfo, bool)
 	AllocateSlot(id AgentID) bool
 	ReleaseSlot(id AgentID)
+	Remove(id AgentID)
 }
 
 // InMemoryRegistry is a simple in-memory implementation of AgentRegistry.
@@ -96,4 +97,10 @@ func (r *InMemoryRegistry) ReleaseSlot(id AgentID) {
 		a.Allocated--
 		r.agents[id] = a
 	}
+}
+
+func (r *InMemoryRegistry) Remove(id AgentID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.agents, id)
 }

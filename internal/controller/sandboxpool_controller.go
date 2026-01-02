@@ -41,8 +41,13 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	currentPods := int32(len(podList.Items))
 
 	// Register Running and Ready Agent Pods to AgentRegistry
+	// Also remove agents that are no longer in the pod list
+	registeredAgents := make(map[agentpool.AgentID]bool)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
+		agentID := agentpool.AgentID(pod.Name)
+		registeredAgents[agentID] = true
+
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
@@ -59,7 +64,6 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		// Register to AgentRegistry if not already registered
-		agentID := agentpool.AgentID(pod.Name)
 		if _, exists := r.Registry.GetAgentByID(agentID); !exists {
 			agentInfo := agentpool.AgentInfo{
 				ID:        agentID,
@@ -74,6 +78,17 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			r.Registry.RegisterOrUpdate(agentInfo)
 			logger.Info("Registered Agent to Registry", "agentID", agentID, "podIP", pod.Status.PodIP)
+		}
+	}
+
+	// Remove agents from registry that are no longer present in pod list
+	allAgents := r.Registry.GetAllAgents()
+	for _, agent := range allAgents {
+		if agent.PoolName == pool.Name && agent.Namespace == pool.Namespace {
+			if !registeredAgents[agent.ID] {
+				r.Registry.Remove(agent.ID)
+				logger.Info("Removed Agent from Registry", "agentID", agent.ID, "reason", "pod no longer exists")
+			}
 		}
 	}
 
