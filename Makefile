@@ -15,9 +15,10 @@ help:
 	@echo "  make build             - build controller and agent binaries"
 	@echo "  make build-agent-linux - build agent binary for linux/amd64"
 	@echo "  make test              - run unit tests (go test ./...)"
+	@echo "  make e2e               - run Ginkgo e2e tests"
+	@echo "  make e2e-shell         - run legacy shell-based e2e test"
 	@echo "  make docker-agent      - build agent container image (requires build-agent-linux)"
 	@echo "  make kind-load-agent   - load agent image into kind cluster 'fast-sandbox'"
-	@echo "  make e2e               - placeholder for e2e tests"
 
 build: build-controller build-agent
 
@@ -52,6 +53,11 @@ kind-load-agent:
 # Placeholder for end-to-end tests; to be implemented later
 # Can be wired to run controller in cluster, apply CRDs, and validate behavior.
 e2e:
-	@echo "Running e2e test: SandboxClaim scheduling..."
+	@echo "Running Ginkgo e2e tests..."
+	go test -v ./test/e2e/... -ginkgo.v
+
+# 旧的 shell 脚本测试（保留用于参考）
+e2e-shell:
+	@echo "Running shell-based e2e test..."
 	@chmod +x test/e2e/test_sandboxclaim_scheduling.sh
 	@test/e2e/test_sandboxclaim_scheduling.sh

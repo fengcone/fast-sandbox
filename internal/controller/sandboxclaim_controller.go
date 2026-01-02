@@ -38,7 +38,7 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if claim.Status.Phase == "" || claim.Status.Phase == "Pending" {
 		agents := r.Registry.GetAllAgents()
 		logger.Info("Scheduling SandboxClaim", "name", claim.Name, "totalAgents", len(agents))
-		
+
 		agent, err := r.Scheduler.Schedule(ctx, &claim, agents)
 		if err != nil {
 			logger.Info("No available agent, requeuing", "claim", claim.Name, "error", err.Error())
