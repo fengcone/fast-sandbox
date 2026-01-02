@@ -153,13 +153,8 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="DlvLineBreakpoint">
           <url>file://$PROJECT_DIR$/internal/agent/server/rpc_server.go</url>
-          <line>36</line>
+          <line>34</line>
           <option name="timeStamp" value="4" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
-          <url>file://$PROJECT_DIR$/internal/agent/server/rpc_server.go</url>
-          <line>76</line>
-          <option name="timeStamp" value="5" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="DlvLineBreakpoint">
           <url>file://$PROJECT_DIR$/internal/controller/sandboxpool_controller.go</url>
@@ -170,11 +165,6 @@
           <url>file://$PROJECT_DIR$/internal/controller/agentcontrol/loop.go</url>
           <line>56</line>
           <option name="timeStamp" value="8" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
-          <url>file://$PROJECT_DIR$/internal/controller/agentcontrol/loop.go</url>
-          <line>103</line>
-          <option name="timeStamp" value="9" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="DlvLineBreakpoint">
           <url>file://$PROJECT_DIR$/internal/controller/agentclient/client.go</url>

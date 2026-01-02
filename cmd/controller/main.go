@@ -17,7 +17,6 @@ import (
 	"fast-sandbox/internal/controller/agentclient"
 	"fast-sandbox/internal/controller/agentcontrol"
 	"fast-sandbox/internal/controller/agentpool"
-	"fast-sandbox/internal/controller/agentserver"
 	"fast-sandbox/internal/controller/scheduler"
 )
 
@@ -49,15 +48,6 @@ func main() {
 	reg := agentpool.NewInMemoryRegistry()
 	sched := scheduler.NewSimpleScheduler()
 	agentHTTPClient := agentclient.NewAgentClient()
-
-	// 启动 HTTP Server 接收 Agent 注册和心跳
-	agentHTTPServer := agentserver.NewServer(reg, ":9090")
-	go func() {
-		if err := agentHTTPServer.Start(); err != nil {
-			setupLog.Error(err, "agent HTTP server failed")
-		}
-	}()
-
 	if err = (&controller.SandboxClaimReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
