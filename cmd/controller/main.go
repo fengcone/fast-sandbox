@@ -14,6 +14,10 @@ import (
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller"
+	"fast-sandbox/internal/controller/agentclient"
+	"fast-sandbox/internal/controller/agentpool"
+	"fast-sandbox/internal/controller/agentserver"
+	"fast-sandbox/internal/controller/scheduler"
 )
 
 var (
@@ -41,10 +45,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	reg := agentpool.NewInMemoryRegistry()
+	// 注入测试 Agent（后续移除，改为真实 Agent 注册）
+	agentpool.InjectTestAgent(reg)
+	sched := scheduler.NewSimpleScheduler()
+	agentHTTPClient := agentclient.NewAgentClient()
+
+	// 启动 HTTP Server 接收 Agent 注册和心跳
+	agentHTTPServer := agentserver.NewServer(reg, ":9090")
+	go func() {
+		if err := agentHTTPServer.Start(); err != nil {
+			setupLog.Error(err, "agent HTTP server failed")
+		}
+	}()
+
 	if err = (&controller.SandboxClaimReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Ctx:    context.Background(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Ctx:         context.Background(),
+		Registry:    reg,
+		Scheduler:   sched,
+		AgentClient: agentHTTPClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SandboxClaim")
 		os.Exit(1)

@@ -172,7 +172,7 @@ Agent 运行在预先调度好的 Pod 内，负责与 containerd 交互并执行
      - 当前运行中的 sandbox 数。
      - 镜像列表（如有变化）。
 5. 接收创建/销毁 sandbox 指令：
-   - 暴露 gRPC Server 给 Controller：
+   - 暴露 http Server 给 Controller：
      - `CreateSandbox`：根据参数创建 sandbox 容器。
      - `DestroySandbox`：销毁指定 sandbox。
 
@@ -189,7 +189,7 @@ Agent 运行在预先调度好的 Pod 内，负责与 containerd 交互并执行
 
 ## 6. Controller <-> Agent RPC 协议（概念）
 
-Controller 与 Agent 通过 gRPC 通信（proto 定义位于 `proto/agent.proto`）：
+Controller 与 Agent 通过 http 通信
 
 - `Register(RegisterRequest) -> RegisterResponse`
   - Agent 上报自身信息和初始状态，Controller 在内存中注册 Agent。
@@ -234,9 +234,7 @@ fast-sandbox/
       client/
         controller_client.go      # 调用 Controller 的 RPC 客户端
       server/
-        rpc_server.go             # Agent 暴露的 gRPC Server
-  proto/
-    agent.proto                   # Controller <-> Agent 协议
+        rpc_server.go             # Agent 暴露的 http Server
   config/
     crd/
     rbac/
