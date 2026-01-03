@@ -4,7 +4,7 @@ metadata:
   name: test-claim-e2e
   namespace: default
 spec:
-  image: nginx:latest
+  image: test-sandbox:latest
   cpu: "100m"
   memory: "128Mi"
   port: 8080

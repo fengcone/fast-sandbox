@@ -5,7 +5,7 @@ CONTROLLER_IMAGE ?= $(REGISTRY)/controller:dev
 
 # Go settings
 GO ?= go
-GOFLAGS ?=
+GOFLAGS ?= -gcflags="all=-N -l"
 
 .PHONY: all build build-controller build-agent build-agent-linux build-controller-linux test tidy e2e e2e-prepare docker-agent docker-controller kind-load-agent kind-load-controller help
 

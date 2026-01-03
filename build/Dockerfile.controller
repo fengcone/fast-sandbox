@@ -1,0 +1,9 @@
+FROM golang:1.25
+
+WORKDIR /workspace
+COPY bin/controller .
+
+# Controller 监听端口
+EXPOSE 9090 8080
+
+ENTRYPOINT ["./controller"]

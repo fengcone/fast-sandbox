@@ -29,8 +29,6 @@ func (c *AgentClient) SyncSandboxes(agentIP string, agentPort int32, req *api.Sa
 	if agentPort == 0 {
 		agentPort = 8081
 	}
-	// for current test
-	agentIP = "localhost"
 	url := fmt.Sprintf("http://%s:%d/api/v1/agent/sandboxes", agentIP, agentPort)
 
 	data, err := json.Marshal(req)

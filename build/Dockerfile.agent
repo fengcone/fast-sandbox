@@ -1,0 +1,20 @@
+FROM golang:1.25
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+EXPOSE 2345 8081
+
+WORKDIR /workspace
+COPY bin/agent .
+
+# Default envs; can be overridden by Pod spec
+ENV AGENT_PORT=":8081"
+ENV RUNTIME_TYPE="containerd"
+ENV RUNTIME_SOCKET="/run/containerd/containerd.sock"
+
+EXPOSE 8081
+
+# 使用 dlv 启动 agent 进行调试（自动继续执行）
+# 注意：--continue 必须在 exec 命令之前
+#ENTRYPOINT ["/go/bin/dlv", "--listen=:2345", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "/workspace/agent", "--"]
+# 生产环境使用：
+ENTRYPOINT ["./agent"]

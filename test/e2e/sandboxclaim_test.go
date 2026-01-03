@@ -6,8 +6,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -193,13 +191,6 @@ var _ = Describe("SandboxClaim Scheduling", func() {
 	})
 })
 
-// Helper functions
-
-func mustParseQuantity(s string) resource.Quantity {
-	q := resource.MustParse(s)
-	return q
-}
-
 func isPodReady(pod *corev1.Pod) bool {
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
@@ -210,66 +201,4 @@ func isPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
-}
-
-func createAgentPodTemplate() corev1.PodTemplateSpec {
-	return corev1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "sandbox-agent",
-			},
-		},
-		Spec: corev1.PodSpec{
-			ServiceAccountName: "default",
-			Containers: []corev1.Container{
-				{
-					Name:            "agent",
-					Image:           "fast-sandbox-agent:dev",
-					ImagePullPolicy: corev1.PullIfNotPresent,
-					Env: []corev1.EnvVar{
-						{
-							Name: "POD_NAME",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{
-									FieldPath: "metadata.name",
-								},
-							},
-						},
-						{
-							Name: "POD_IP",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{
-									FieldPath: "status.podIP",
-								},
-							},
-						},
-						{
-							Name: "NODE_NAME",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{
-									FieldPath: "spec.nodeName",
-								},
-							},
-						},
-						{
-							Name: "NAMESPACE",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{
-									FieldPath: "metadata.namespace",
-								},
-							},
-						},
-					},
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "agent-http",
-							ContainerPort: 8081,
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			RestartPolicy: corev1.RestartPolicyAlways,
-		},
-	}
 }
