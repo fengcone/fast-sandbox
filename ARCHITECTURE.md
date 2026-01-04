@@ -10,38 +10,7 @@
 
 系统采用 **Controller-Agent** 分离架构，建立在 Kubernetes 之上，但接管了 Sandbox 粒度的调度与管理。
 
-```mermaid
-graph TD
-    User[用户] -->|创建| SandboxCR[Sandbox CR]
-    User -->|配置| PoolCR[SandboxPool CR]
-    
-    subgraph K8s Cluster
-        API[K8s API Server]
-        
-        subgraph Control Plane
-            Controller[Sandbox Controller]
-            PoolController[SandboxPool Controller]
-        end
-        
-        subgraph Worker Node
-            Kubelet[Kubelet]
-            HostRuntime[Host Containerd]
-            
-            subgraph Agent Pod
-                Agent[Agent Process]
-                Sandbox1[Sandbox Container]
-                Sandbox2[Sandbox Container]
-            end
-        end
-    end
-
-    SandboxCR --> Controller
-    PoolCR --> PoolController
-    PoolController -->|创建| Agent
-    Agent -->|gRPC / Socket| HostRuntime
-    Controller -->|HTTP Sync| Agent
-    Agent -->|Status/Images| Controller
-```
+![架构图](ARCHITECTURE.png)
 
 ## 3. 核心组件设计
 
