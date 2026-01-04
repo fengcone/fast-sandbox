@@ -24,11 +24,7 @@ spec:
               image: {type: string}
               command: {type: array, items: {type: string}}
               args: {type: array, items: {type: string}}
-              poolRef:
-                type: object
-                properties:
-                  name: {type: string}
-                  namespace: {type: string}
+              poolRef: {type: string}
           status:
             type: object
             properties:

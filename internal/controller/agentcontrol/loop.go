@@ -88,6 +88,7 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 			PodName:         pod.Name,
 			PodIP:           pod.Status.PodIP,
 			NodeName:        pod.Spec.NodeName,
+			PoolName:        pod.Labels["fast-sandbox.io/pool"],
 			Capacity:        status.Capacity,
 			Allocated:       status.Allocated,
 			Images:          status.Images,

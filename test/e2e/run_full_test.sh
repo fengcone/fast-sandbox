@@ -13,6 +13,12 @@ kubectl delete deployment fast-sandbox-controller --ignore-not-found=true
 kubectl delete sandboxpool --all --ignore-not-found=true
 kubectl delete sandbox --all --ignore-not-found=true
 
+echo "=== 0.1 Cleanup Containerd Residue ==="
+# Clean up potential leftover containers from previous runs to ensure a clean state
+docker exec fast-sandbox-control-plane ctr -n k8s.io task kill -s SIGKILL test-sandbox >/dev/null 2>&1 || true
+docker exec fast-sandbox-control-plane ctr -n k8s.io task delete test-sandbox >/dev/null 2>&1 || true
+docker exec fast-sandbox-control-plane ctr -n k8s.io container delete test-sandbox >/dev/null 2>&1 || true
+
 echo "=== 1. Building Images ==="
 # Ensure we are in root
 cd "$(dirname "$0")/../../"
@@ -47,23 +53,26 @@ echo "=== 7. Applying Sandbox ==="
 kubectl apply -f test/e2e/manifests/sandbox.yaml
 
 echo "=== 8. Verifying Sandbox Status ==="
-echo "Waiting for sandbox to be Bound..."
+echo "Waiting for sandbox to be Running..."
 # Loop check for status
 for i in {1..30}; do
     PHASE=$(kubectl get sandbox test-sandbox -o jsonpath="{.status.phase}" 2>/dev/null || echo "")
     ASSIGNED=$(kubectl get sandbox test-sandbox -o jsonpath="{.status.assignedPod}" 2>/dev/null || echo "")
-    echo "Check $i: Phase=$PHASE, Assigned=$ASSIGNED"
+    SB_ID=$(kubectl get sandbox test-sandbox -o jsonpath="{.status.sandboxID}" 2>/dev/null || echo "")
+    echo "Check $i: Phase=$PHASE, Assigned=$ASSIGNED, SandboxID=$SB_ID"
     
-    if [[ "$PHASE" == "Bound" || "$PHASE" == "Running" ]] && [[ "$ASSIGNED" != "" ]]; then
-        echo "SUCCESS: Sandbox scheduled to $ASSIGNED"
+    if [[ "$PHASE" == "running" ]] && [[ "$ASSIGNED" != "" ]]; then
+        echo "SUCCESS: Sandbox is RUNNING on $ASSIGNED"
         break
     fi
     if [ $i -eq 30 ]; then
-        echo "TIMEOUT: Sandbox failed to schedule/run."
+        echo "TIMEOUT: Sandbox failed to reach running state."
         echo "--- Controller Logs ---"
         kubectl logs -l control-plane=controller-manager --tail=50
-        echo "--- Sandbox Description ---"
-        kubectl describe sandbox test-sandbox
+        echo "--- Agent Logs ---"
+        kubectl logs -l app=sandbox-agent --tail=50
+        echo "--- Sandbox Status ---"
+        kubectl get sandbox test-sandbox -o yaml
         exit 1
     fi
     sleep 2

@@ -6,5 +6,4 @@ metadata:
 spec:
   image: docker.io/fast-sandbox/agent:dev
   command: ["/bin/sleep", "3600"]
-  poolRef:
-    name: default-pool
+  poolRef: default-pool

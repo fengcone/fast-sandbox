@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
@@ -66,7 +67,7 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
@@ -94,6 +95,13 @@ func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.Ag
 	// Filter & Score
 	var candidates []agentpool.AgentInfo
 	for _, a := range agents {
+		// Pool Filtering
+		if sandbox.Spec.PoolRef != "" {
+			if a.PoolName != sandbox.Spec.PoolRef {
+				continue
+			}
+		}
+
 		// Capacity check
 		if a.Allocated >= a.Capacity {
 			continue
@@ -139,6 +147,9 @@ func scoreAgent(agent agentpool.AgentInfo, sandbox apiv1alpha1.Sandbox) int {
 }
 
 func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) error {
+	log := log.FromContext(ctx)
+	log.Info("Syncing agent", "agent", agentPodName)
+
 	// 1. Get Agent Info
 	agentID := agentpool.AgentID(agentPodName)
 	agentInfo, ok := r.Registry.GetAgentByID(agentID)
@@ -151,6 +162,8 @@ func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) 
 	if err := r.List(ctx, &sandboxList, client.MatchingFields{"status.assignedPod": agentPodName}); err != nil {
 		return err
 	}
+	
+	log.Info("Found sandboxes for agent", "agent", agentPodName, "count", len(sandboxList.Items))
 
 	var specs []api.SandboxSpec
 	for _, sb := range sandboxList.Items {

@@ -14,12 +14,6 @@ var (
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
-// PoolReference optionally selects a SandboxPool for this claim.
-type PoolReference struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace,omitempty"`
-}
-
 // SandboxSpec defines the desired state of Sandbox.
 type SandboxSpec struct {
 	Image      string          `json:"image"`
@@ -29,7 +23,7 @@ type SandboxSpec struct {
 	WorkingDir string          `json:"workingDir,omitempty"`
 
 	TTLSeconds *int32           `json:"ttlSeconds,omitempty"`
-	PoolRef    *PoolReference   `json:"poolRef,omitempty"`
+	PoolRef    string           `json:"poolRef,omitempty"`
 	Resources  SandboxResources `json:"resources,omitempty"`
 }
 
