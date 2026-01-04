@@ -5,6 +5,8 @@ import (
 	"flag"
 	"os"
 
+	"fast-sandbox/internal/api"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -14,10 +16,8 @@ import (
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller"
-	"fast-sandbox/internal/controller/agentclient"
 	"fast-sandbox/internal/controller/agentcontrol"
 	"fast-sandbox/internal/controller/agentpool"
-	"fast-sandbox/internal/controller/scheduler"
 )
 
 var (
@@ -46,16 +46,14 @@ func main() {
 	}
 
 	reg := agentpool.NewInMemoryRegistry()
-	sched := scheduler.NewSimpleScheduler()
-	agentHTTPClient := agentclient.NewAgentClient()
-	if err = (&controller.SandboxClaimReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Ctx:       context.Background(),
-		Registry:  reg,
-		Scheduler: sched,
+	agentHTTPClient := api.NewAgentClient()
+	if err = (&controller.SandboxReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Ctx:      context.Background(),
+		Registry: reg,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SandboxClaim")
+		setupLog.Error(err, "unable to create controller", "controller", "Sandbox")
 		os.Exit(1)
 	}
 

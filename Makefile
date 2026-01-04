@@ -79,9 +79,3 @@ e2e-prepare:
 e2e: e2e-prepare
 	@echo "Running Ginkgo e2e tests..."
 	go test -v ./test/e2e/... -ginkgo.v
-
-# 旧的 shell 脚本测试（保留用于参考）
-e2e-shell:
-	@echo "Running shell-based e2e test..."
-	@chmod +x test/e2e/test_sandboxclaim_scheduling.sh
-	@test/e2e/test_sandboxclaim_scheduling.sh

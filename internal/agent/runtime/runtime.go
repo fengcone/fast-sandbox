@@ -7,8 +7,8 @@ import (
 // SandboxMetadata 包含 sandbox 容器的元数据
 type SandboxMetadata struct {
 	SandboxID   string            // sandbox 的唯一标识符
-	ClaimUID    string            // 关联的 SandboxClaim UID
-	ClaimName   string            // 关联的 SandboxClaim 名称
+	ClaimUID    string            // 关联的 Sandbox UID
+	ClaimName   string            // 关联的 Sandbox 名称
 	ContainerID string            // 底层容器运行时的容器 ID
 	Image       string            // 容器镜像
 	Command     []string          // 启动命令
@@ -23,8 +23,8 @@ type SandboxMetadata struct {
 // SandboxConfig 定义创建 sandbox 的配置
 type SandboxConfig struct {
 	SandboxID string            // sandbox 的唯一标识符
-	ClaimUID  string            // 关联的 SandboxClaim UID
-	ClaimName string            // 关联的 SandboxClaim 名称
+	ClaimUID  string            // 关联的 Sandbox UID
+	ClaimName string            // 关联的 Sandbox 名称
 	Image     string            // 容器镜像
 	Command   []string          // 启动命令（可选）
 	Args      []string          // 启动参数（可选）
@@ -61,15 +61,6 @@ type Runtime interface {
 	// PullImage 拉取指定的容器镜像
 	// 如果镜像已存在则跳过
 	PullImage(ctx context.Context, image string) error
-
-	// GetPodCgroupPath 获取当前 Pod 的 cgroup 路径
-	// 用于将 sandbox 容器加入相同的 cgroup
-	GetPodCgroupPath() (string, error)
-
-	// GetPodNetNS 获取当前 Pod 的 network namespace 路径
-	// 用于让 sandbox 容器共享 Pod 的网络
-	GetPodNetNS() (string, error)
-
 	// Close 关闭运行时客户端连接
 	Close() error
 }

@@ -6,28 +6,28 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller/agentpool"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// SandboxPoolReconciler reconciles SandboxPool resources.
-type SandboxPoolReconciler struct {
+// SandboxReconciler reconciles Sandbox resources.
+type SandboxReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
+	Ctx      context.Context
 	Registry agentpool.AgentRegistry
 }
 
-// Reconcile currently manages SandboxPool pods and updates status.
-func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// Reconcile is the main reconciliation loop.
+func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *SandboxPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1alpha1.SandboxPool{}).
-		Owns(&corev1.Pod{}).
+		For(&apiv1alpha1.Sandbox{}).
 		Complete(r)
 }

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"fast-sandbox/internal/api"
@@ -28,87 +27,7 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 // SyncSandboxes 同步期望的 sandbox 列表
 // 这是 Controller 调用的主要接口，实现声明式状态同步
 func (m *SandboxManager) SyncSandboxes(ctx context.Context, desired []api.SandboxDesired) ([]api.SandboxStatus, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 1. 构建期望的 sandbox 集合
-	desiredMap := make(map[string]*api.SandboxDesired)
-	for i := range desired {
-		d := &desired[i]
-		desiredMap[d.SandboxID] = d
-	}
-
-	// 2. 获取当前实际运行的 sandbox
-	actual, err := m.runtime.ListSandboxes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sandboxes: %w", err)
-	}
-
-	actualMap := make(map[string]*SandboxMetadata)
-	for _, meta := range actual {
-		actualMap[meta.SandboxID] = meta
-	}
-
-	// 3. 找出需要删除的 sandbox（在 actual 中但不在 desired 中）
-	for sandboxID := range actualMap {
-		if _, exists := desiredMap[sandboxID]; !exists {
-			if err := m.runtime.DeleteSandbox(ctx, sandboxID); err != nil {
-				// 记录错误但继续处理其他 sandbox
-				fmt.Printf("Warning: failed to delete sandbox %s: %v\n", sandboxID, err)
-			} else {
-				delete(actualMap, sandboxID)
-			}
-		}
-	}
-
-	// 4. 找出需要创建的 sandbox（在 desired 中但不在 actual 中）
-	for sandboxID, d := range desiredMap {
-		if _, exists := actualMap[sandboxID]; !exists {
-			config := &SandboxConfig{
-				SandboxID: d.SandboxID,
-				ClaimUID:  d.ClaimUID,
-				ClaimName: d.ClaimName,
-				Image:     d.Image,
-				Command:   d.Command,
-				Args:      d.Args,
-				Env:       d.Env,
-				CPU:       d.CPU,
-				Memory:    d.Memory,
-				Port:      d.Port,
-			}
-
-			meta, err := m.runtime.CreateSandbox(ctx, config)
-			if err != nil {
-				// 记录错误但继续处理其他 sandbox
-				fmt.Printf("Warning: failed to create sandbox %s: %v\n", sandboxID, err)
-				// 创建失败的 sandbox 也要返回状态
-				actualMap[sandboxID] = &SandboxMetadata{
-					SandboxID: sandboxID,
-					ClaimUID:  d.ClaimUID,
-					Status:    "failed",
-				}
-			} else {
-				actualMap[sandboxID] = meta
-			}
-		}
-	}
-
-	// 5. 构建返回的状态列表
-	statuses := make([]api.SandboxStatus, 0, len(actualMap))
-	for _, meta := range actualMap {
-		status := api.SandboxStatus{
-			SandboxID: meta.SandboxID,
-			ClaimUID:  meta.ClaimUID,
-			Phase:     meta.Status,
-			Port:      meta.Port,
-		}
-		statuses = append(statuses, status)
-	}
-
-	// 6. 更新内部缓存
-	m.sandboxes = actualMap
-
-	return statuses, nil
+	return nil, nil
 }
 
 // GetSandbox 获取指定 sandbox 的元数据
