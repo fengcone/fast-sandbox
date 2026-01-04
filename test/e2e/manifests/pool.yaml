@@ -1,0 +1,18 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxPool
+metadata:
+  name: default-pool
+  namespace: default
+spec:
+  capacity:
+    poolMin: 1
+    poolMax: 5
+  agentTemplate:
+    metadata:
+      labels:
+        env: test
+    spec:
+      containers:
+      - name: agent
+        image: fast-sandbox/agent:dev
+        imagePullPolicy: IfNotPresent

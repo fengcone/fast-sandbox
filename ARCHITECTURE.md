@@ -47,10 +47,15 @@ graph TD
 
 ### 3.1. SandboxPool (资源缓冲层)
 *   **职责**: 维护一组 "热" 资源（Agent Pods）。
+*   **管控模式**: **Direct Pod Management** (直接管控 Pod)。
+    *   `SandboxPoolController` 不依赖 `Deployment` 或 `StatefulSet`，而是直接创建和管理 `CoreV1.Pod` 资源。
+    *   **优势**:
+        1.  **精准调度 (Targeted Provisioning)**: 可根据待处理 Sandbox 的镜像需求，结合 Node 镜像缓存情况，定向在特定 Node 上创建 Agent Pod，最大化亲和性。
+        2.  **精细化缩容**: 可选择性删除空闲时间最长或位于资源紧张节点的 Pod，而非随机缩容。
 *   **机制**: 
     *   Controller 根据 `SandboxPool` CR 定义的容量（Min/Max），向 K8s 申请创建 Agent Pods。
+    *   **Pod 构建**: 自动注入 Runtime 所需的特权配置（HostPath 挂载、SecurityContext、Env 等），确保 Agent 能接管宿主机 Containerd。
     *   这些 Pods 是**同构的**，申请了固定的物理资源（如 4C8G），作为后续 Sandbox 的宿主。
-    *   这些 Pods 在 K8s 看来是普通的业务 Pod，由 Kubelet 负责生命周期。
 
 ### 3.2. Agent (数据面)
 运行在 Agent Pod 内部的守护进程，是 Sandbox 的实际管理者。
