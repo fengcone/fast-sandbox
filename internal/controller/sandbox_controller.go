@@ -60,7 +60,29 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// 3. Update Status from Registry
+	if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
+		logger.Error(err, "Failed to update sandbox status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !ok {
+		return nil
+	}
+
+	if status, ok := agentInfo.SandboxStatuses[sandbox.Name]; ok {
+		if sandbox.Status.Phase != status.Phase || sandbox.Status.SandboxID != status.SandboxID {
+			sandbox.Status.Phase = status.Phase
+			sandbox.Status.SandboxID = status.SandboxID
+			return r.Status().Update(ctx, sandbox)
+		}
+	}
+	return nil
 }
 
 func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {

@@ -77,16 +77,22 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		}
 
 		// 3. Update Registry
+		sbStatuses := make(map[string]api.SandboxStatus)
+		for _, s := range status.SandboxStatuses {
+			sbStatuses[s.SandboxID] = s
+		}
+
 		info := agentpool.AgentInfo{
-			ID:            agentpool.AgentID(pod.Name),
-			Namespace:     pod.Namespace,
-			PodName:       pod.Name,
-			PodIP:         pod.Status.PodIP,
-			NodeName:      pod.Spec.NodeName,
-			Capacity:      status.Capacity,
-			Allocated:     status.Allocated,
-			Images:        status.Images,
-			LastHeartbeat: time.Now(),
+			ID:              agentpool.AgentID(pod.Name),
+			Namespace:       pod.Namespace,
+			PodName:         pod.Name,
+			PodIP:           pod.Status.PodIP,
+			NodeName:        pod.Spec.NodeName,
+			Capacity:        status.Capacity,
+			Allocated:       status.Allocated,
+			Images:          status.Images,
+			SandboxStatuses: sbStatuses,
+			LastHeartbeat:   time.Now(),
 		}
 		l.Registry.RegisterOrUpdate(info)
 	}

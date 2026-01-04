@@ -3,6 +3,8 @@ package agentpool
 import (
 	"sync"
 	"time"
+
+	"fast-sandbox/internal/api"
 )
 
 // AgentID is a logical identifier for an agent instance.
@@ -10,16 +12,17 @@ type AgentID string
 
 // AgentInfo describes a sandbox agent pod registered in controller memory.
 type AgentInfo struct {
-	ID            AgentID
-	Namespace     string
-	PodName       string
-	PodIP         string
-	NodeName      string
-	PoolName      string
-	Capacity      int
-	Allocated     int
-	Images        []string
-	LastHeartbeat time.Time
+	ID              AgentID
+	Namespace       string
+	PodName         string
+	PodIP           string
+	NodeName        string
+	PoolName        string
+	Capacity        int
+	Allocated       int
+	Images          []string
+	SandboxStatuses map[string]api.SandboxStatus
+	LastHeartbeat   time.Time
 }
 
 // AgentRegistry defines operations to manage agents in controller memory.
