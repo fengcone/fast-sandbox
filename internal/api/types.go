@@ -1,7 +1,7 @@
 package api
 
-// SandboxDesired describes the desired state of a sandbox on an agent.
-type SandboxDesired struct {
+// SandboxSpec describes the desired state of a sandbox on an agent.
+type SandboxSpec struct {
 	SandboxID string `json:"sandboxId"`
 	// sandbox cr uid and name
 	ClaimUID  string            `json:"claimUid"`
@@ -24,15 +24,18 @@ type SandboxStatus struct {
 
 // SandboxesRequest is sent by Controller to Agent with desired sandboxes.
 type SandboxesRequest struct {
-	AgentID   string           `json:"agentId"`
-	Sandboxes []SandboxDesired `json:"sandboxes"`
+	AgentID      string        `json:"agentId"`
+	SandboxSpecs []SandboxSpec `json:"sandboxSpecs"`
 }
 
 // AgentStatus represents the current status of an agent (internal use).
 type AgentStatus struct {
-	AgentID   string          `json:"agentId"`
-	Capacity  int             `json:"capacity"`
-	Allocated int             `json:"allocated"`
-	Images    []string        `json:"images"`
-	Sandboxes []SandboxStatus `json:"sandboxes"`
+	AgentID      string        `json:"agentId"`
+	SandboxSpecs []SandboxSpec `json:"sandboxSpecs"`
+	// contained的实现是k8s 的node，其他实现如果不能共享image，那么应当将pod name 作为 nodeName ，以便让Controller 进行调度
+	NodeName       string          `json:"nodeName"`
+	Capacity       int             `json:"capacity"`
+	Allocated      int             `json:"allocated"`
+	Images         []string        `json:"images"`
+	SandboxStatuses []SandboxStatus `json:"sandboxStatuses"`
 }

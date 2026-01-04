@@ -48,10 +48,11 @@ func main() {
 	reg := agentpool.NewInMemoryRegistry()
 	agentHTTPClient := api.NewAgentClient()
 	if err = (&controller.SandboxReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Ctx:      context.Background(),
-		Registry: reg,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Ctx:         context.Background(),
+		Registry:    reg,
+		AgentClient: agentHTTPClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Sandbox")
 		os.Exit(1)

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"log"
 	"sync"
 
 	"fast-sandbox/internal/api"
@@ -26,8 +27,60 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 
 // SyncSandboxes 同步期望的 sandbox 列表
 // 这是 Controller 调用的主要接口，实现声明式状态同步
-func (m *SandboxManager) SyncSandboxes(ctx context.Context, desired []api.SandboxDesired) ([]api.SandboxStatus, error) {
-	return nil, nil
+func (m *SandboxManager) SyncSandboxes(ctx context.Context, desired []api.SandboxSpec) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. 获取当前所有 Sandboxes
+	currentSandboxes, err := m.runtime.ListSandboxes(ctx)
+	if err != nil {
+		return err
+	}
+
+	currentMap := make(map[string]*SandboxMetadata)
+	for _, sb := range currentSandboxes {
+		currentMap[sb.SandboxID] = sb
+	}
+
+	desiredMap := make(map[string]api.SandboxSpec)
+	for _, spec := range desired {
+		desiredMap[spec.SandboxID] = spec
+	}
+
+	// 2. 找出需要创建的 (在 Desired 中，不在 Current 中)
+	for id, spec := range desiredMap {
+		if _, exists := currentMap[id]; !exists {
+			// 创建新的 Sandbox
+			config := &SandboxConfig{
+				SandboxID: spec.SandboxID,
+				ClaimUID:  spec.ClaimUID,
+				ClaimName: spec.ClaimName,
+				Image:     spec.Image,
+				Command:   spec.Command,
+				Args:      spec.Args,
+				Env:       spec.Env,
+				CPU:       spec.CPU,
+				Memory:    spec.Memory,
+			}
+			log.Printf("Creating sandbox: %s (Image: %s)", id, spec.Image)
+			if _, err := m.runtime.CreateSandbox(ctx, config); err != nil {
+				log.Printf("Failed to create sandbox %s: %v", id, err)
+				// 继续处理其他的
+			}
+		}
+	}
+
+	// 3. 找出需要删除的 (在 Current 中，不在 Desired 中)
+	for id := range currentMap {
+		if _, exists := desiredMap[id]; !exists {
+			log.Printf("Deleting sandbox: %s", id)
+			if err := m.runtime.DeleteSandbox(ctx, id); err != nil {
+				log.Printf("Failed to delete sandbox %s: %v", id, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // GetSandbox 获取指定 sandbox 的元数据

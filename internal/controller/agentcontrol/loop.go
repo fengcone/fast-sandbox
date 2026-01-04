@@ -2,11 +2,13 @@ package agentcontrol
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
 
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -49,6 +51,44 @@ func (l *Loop) Start(ctx context.Context) {
 }
 
 func (l *Loop) syncOnce(ctx context.Context) error {
+	logger := ctrl.Log.WithName("agent-control-loop")
 
+	// 1. List all Agent Pods
+	var podList corev1.PodList
+	// 暂时只查找 default namespace 下带有 app=sandbox-agent 标签的 Pod
+	// 在生产环境中，这应该通过 SandboxPool 的 OwnerReference 或更精确的 Selector 来查找
+	if err := l.Client.List(ctx, &podList, client.MatchingLabels{"app": "sandbox-agent"}); err != nil {
+		return err
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
+			continue
+		}
+
+		// 2. Probe Agent
+		// 假设 Agent 端口固定为 8081，可以通过 Pod Annotation 或 Env 配置
+		endpoint := fmt.Sprintf("%s:8081", pod.Status.PodIP)
+		status, err := l.AgentClient.GetAgentStatus(endpoint)
+		if err != nil {
+			logger.Error(err, "Failed to probe agent", "pod", pod.Name, "ip", pod.Status.PodIP)
+			// TODO: 如果连续失败，考虑从 Registry 中移除
+			continue
+		}
+
+		// 3. Update Registry
+		info := agentpool.AgentInfo{
+			ID:            agentpool.AgentID(pod.Name),
+			Namespace:     pod.Namespace,
+			PodName:       pod.Name,
+			PodIP:         pod.Status.PodIP,
+			NodeName:      pod.Spec.NodeName,
+			Capacity:      status.Capacity,
+			Allocated:     status.Allocated,
+			Images:        status.Images,
+			LastHeartbeat: time.Now(),
+		}
+		l.Registry.RegisterOrUpdate(info)
+	}
 	return nil
 }
