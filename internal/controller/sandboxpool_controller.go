@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller/agentpool"
@@ -125,6 +126,10 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 				Name:      "POD_UID",
 				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
 			},
+			corev1.EnvVar{
+				Name:  "AGENT_CAPACITY",
+				Value: fmt.Sprintf("%d", getAgentCapacity(pool)),
+			},
 			corev1.EnvVar{Name: "RUNTIME_SOCKET", Value: "/run/containerd/containerd.sock"},
 		)
 
@@ -177,6 +182,13 @@ func poolLabels(poolName string) map[string]string {
 		"fast-sandbox.io/pool": poolName,
 		"app":                  "sandbox-agent", // Standard label for agent discovery
 	}
+}
+
+func getAgentCapacity(pool *apiv1alpha1.SandboxPool) int32 {
+	if pool.Spec.MaxSandboxesPerPod > 0 {
+		return pool.Spec.MaxSandboxesPerPod
+	}
+	return 5 // 默认容量
 }
 
 func boolPtr(b bool) *bool {

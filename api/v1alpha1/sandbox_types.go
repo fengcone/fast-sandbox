@@ -22,15 +22,8 @@ type SandboxSpec struct {
 	Envs       []corev1.EnvVar `json:"envs,omitempty"`
 	WorkingDir string          `json:"workingDir,omitempty"`
 
-	TTLSeconds *int32           `json:"ttlSeconds,omitempty"`
-	PoolRef    string           `json:"poolRef,omitempty"`
-	Resources  SandboxResources `json:"resources,omitempty"`
-}
-
-type SandboxResources struct {
-	CPU    int32 `json:"cpu,omitempty"`
-	Memory int32 `json:"memory,omitempty"`
-	// other resource
+	TTLSeconds *int32 `json:"ttlSeconds,omitempty"`
+	PoolRef    string `json:"poolRef,omitempty"`
 }
 
 // SandboxStatus defines the observed state of Sandbox.

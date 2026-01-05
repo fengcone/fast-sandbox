@@ -65,6 +65,7 @@ spec:
                   poolMax: {type: integer}
                   bufferMin: {type: integer}
                   bufferMax: {type: integer}
+              maxSandboxesPerPod: {type: integer}
               agentTemplate:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true

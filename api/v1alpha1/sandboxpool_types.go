@@ -8,8 +8,9 @@ import (
 
 // SandboxPoolSpec defines the desired state of SandboxPool.
 type SandboxPoolSpec struct {
-	Capacity      PoolCapacity           `json:"capacity"`
-	AgentTemplate corev1.PodTemplateSpec `json:"agentTemplate"`
+	Capacity             PoolCapacity           `json:"capacity"`
+	MaxSandboxesPerPod   int32                  `json:"maxSandboxesPerPod,omitempty"`
+	AgentTemplate        corev1.PodTemplateSpec `json:"agentTemplate"`
 }
 
 // PoolCapacity describes the sizing policy of the agent pool.

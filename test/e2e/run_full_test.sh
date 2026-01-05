@@ -79,3 +79,29 @@ for i in {1..30}; do
 done
 
 echo "=== Test Completed Successfully ==="
+
+echo "=== 9. Testing Capacity Limit (agentCapacity=1) ==="
+cat <<EOF > test/e2e/manifests/sandbox-2.yaml
+apiVersion: sandbox.fast.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: test-sandbox-2
+  namespace: default
+spec:
+  image: docker.io/fast-sandbox/agent:dev
+  command: ["/bin/sleep", "3600"]
+  poolRef: default-pool
+EOF
+kubectl apply -f test/e2e/manifests/sandbox-2.yaml
+sleep 5
+PHASE2=$(kubectl get sandbox test-sandbox-2 -o jsonpath="{.status.phase}" 2>/dev/null || echo "")
+ASSIGNED2=$(kubectl get sandbox test-sandbox-2 -o jsonpath="{.status.assignedPod}" 2>/dev/null || echo "")
+echo "Second Sandbox: Phase='$PHASE2', Assigned='$ASSIGNED2'"
+
+if [[ "$ASSIGNED2" == "" ]]; then
+    echo "VERIFICATION SUCCESS: Second sandbox remains unscheduled due to capacity limit."
+    kubectl delete sandbox test-sandbox-2
+else
+    echo "VERIFICATION FAILURE: Second sandbox was scheduled to $ASSIGNED2 but capacity is 1!"
+    exit 1
+fi
