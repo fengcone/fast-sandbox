@@ -93,8 +93,8 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 
 	// --- Injection Logic Start ---
 
-	// 1. Host Network
-	podSpec.HostNetwork = true
+	// 1. Network Namespace (HostPID removed for security)
+	podSpec.HostNetwork = false // 禁用宿主机网络，使用 Pod 独立网络
 
 	// 2. Containers Injection
 	if len(podSpec.Containers) > 0 {
@@ -110,16 +110,20 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 		// Environment Variables
 		c.Env = append(c.Env,
 			corev1.EnvVar{
-				Name: "NODE_NAME",
+				Name:      "NODE_NAME",
 				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
 			},
 			corev1.EnvVar{
-				Name: "POD_NAME",
+				Name:      "POD_NAME",
 				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}},
 			},
 			corev1.EnvVar{
-				Name: "POD_IP",
+				Name:      "POD_IP",
 				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}},
+			},
+			corev1.EnvVar{
+				Name:      "POD_UID",
+				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
 			},
 			corev1.EnvVar{Name: "RUNTIME_SOCKET", Value: "/run/containerd/containerd.sock"},
 		)

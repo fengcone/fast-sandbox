@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,11 +45,82 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 
 	r.client = client
 	r.sandboxes = make(map[string]*SandboxMetadata)
-	// TODO: 自动探测 Pod 的 Cgroup 路径和 NetNS 路径
-	// r.cgroupPath = ...
-	// r.netnsPath = ...
+
+	// 自动探测 Cgroup 路径，用于资源隔离 (Cgroup Nesting)
+	if err := r.discoverCgroupPath(); err != nil {
+		fmt.Printf("Warning: failed to discover cgroup path: %v\n", err)
+	} else {
+		fmt.Printf("Discovered agent cgroup path: %s\n", r.cgroupPath)
+	}
+
+	// 自动探测自身的 Network Namespace 路径
+	if err := r.discoverNetNSPath(ctx); err != nil {
+		fmt.Printf("Warning: failed to discover network namespace: %v\n", err)
+	} else {
+		fmt.Printf("Discovered agent network namespace: %s\n", r.netnsPath)
+	}
 
 	return nil
+}
+
+func (r *ContainerdRuntime) discoverCgroupPath() error {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		// Cgroup v2 (Unified hierarchy)
+		if strings.HasPrefix(line, "0::") {
+			r.cgroupPath = strings.TrimPrefix(line, "0::")
+			return nil
+		}
+		// Cgroup v1 (Fallback)
+		parts := strings.Split(line, ":")
+		if len(parts) == 3 && (strings.Contains(parts[1], "pids") || strings.Contains(parts[1], "cpu")) {
+			r.cgroupPath = parts[2]
+			return nil
+		}
+	}
+	return fmt.Errorf("cgroup path not found in /proc/self/cgroup")
+}
+
+func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
+	// 1. 从 cgroup 路径中尝试提取容器 ID
+	// 典型路径: /kubelet.slice/kubelet-kubepods.slice/.../cri-containerd-<ID>.scope
+	if r.cgroupPath == "" {
+		return fmt.Errorf("cgroup path is required to discover container ID")
+	}
+
+	parts := strings.Split(r.cgroupPath, "cri-containerd-")
+	if len(parts) < 2 {
+		return fmt.Errorf("could not parse container ID from cgroup path: %s", r.cgroupPath)
+	}
+	containerID := strings.Split(parts[1], ".")[0]
+
+	// 2. 从 containerd 获取容器信息
+	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+	container, err := r.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("failed to load self container %s: %w", containerID, err)
+	}
+
+	spec, err := container.Spec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get container spec: %w", err)
+	}
+
+	// 3. 提取 Network Namespace 路径
+	for _, ns := range spec.Linux.Namespaces {
+		if ns.Type == specs.NetworkNamespace {
+			if ns.Path != "" {
+				r.netnsPath = ns.Path
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("network namespace path not found in agent container spec")
 }
 
 func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxConfig) (*SandboxMetadata, error) {
@@ -77,12 +151,27 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 	}
 
 	// 3. 准备 OCI Spec
-	// 复用 Host 网络 (相对于 Agent Pod)
 	specOpts := []oci.SpecOpts{
 		oci.WithImageConfig(image),
 		oci.WithProcessArgs(append(config.Command, config.Args...)...),
 		oci.WithEnv(envMapToSlice(config.Env)),
-		oci.WithHostNamespace(specs.NetworkNamespace),
+	}
+
+	// 共享 Agent Pod 的网络空间
+	if r.netnsPath != "" {
+		specOpts = append(specOpts, oci.WithLinuxNamespace(specs.LinuxNamespace{
+			Type: specs.NetworkNamespace,
+			Path: r.netnsPath,
+		}))
+	} else {
+		// 回退方案：如果探测不到，暂时使用宿主机网络 (或者报错)
+		specOpts = append(specOpts, oci.WithHostNamespace(specs.NetworkNamespace))
+	}
+
+	// 如果探测到了父级 Cgroup，则注入子 Cgroup 路径，实现资源嵌套隔离
+	if r.cgroupPath != "" {
+		sandboxCgroup := filepath.Join(r.cgroupPath, "sandbox-"+containerID)
+		specOpts = append(specOpts, oci.WithCgroup(sandboxCgroup))
 	}
 
 	// 4. 创建容器
