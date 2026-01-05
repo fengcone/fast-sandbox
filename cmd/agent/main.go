@@ -18,34 +18,26 @@ func main() {
 	nodeName := getEnv("NODE_NAME", "local-node")
 	namespace := getEnv("NAMESPACE", "default")
 	agentPort := getEnv("AGENT_PORT", ":8081")
-	runtimeType := getEnv("RUNTIME_TYPE", "containerd") // 支持 containerd, docker, crio
-	runtimeSocket := getEnv("RUNTIME_SOCKET", "")       // 空字符串使用默认路径
+	// 读取运行时类型：container 或 firecracker
+	runtimeTypeStr := getEnv("RUNTIME_TYPE", "container")
+	runtimeSocket := getEnv("RUNTIME_SOCKET", "") // 空字符串使用默认路径
 
 	log.Printf("Agent Info: PodName=%s, PodIP=%s, NodeName=%s, Namespace=%s\n", podName, podIP, nodeName, namespace)
-	log.Printf("Runtime: Type=%s, Socket=%s\n", runtimeType, runtimeSocket)
+	log.Printf("Runtime: Type=%s, Socket=%s\n", runtimeTypeStr, runtimeSocket)
 
 	// 初始化容器运行时
 	ctx := context.Background()
 	var rt runtime.Runtime
 	var err error
 
-	switch runtimeType {
-	case "containerd":
-		rt, err = runtime.NewRuntime(ctx, runtime.RuntimeTypeContainerd, runtimeSocket)
-	case "docker":
-		rt, err = runtime.NewRuntime(ctx, runtime.RuntimeTypeDocker, runtimeSocket)
-	case "crio":
-		rt, err = runtime.NewRuntime(ctx, runtime.RuntimeTypeCRIO, runtimeSocket)
-	default:
-		log.Fatalf("Unsupported runtime type: %s", runtimeType)
-	}
+	rt, err = runtime.NewRuntime(ctx, runtime.RuntimeType(runtimeTypeStr), runtimeSocket)
 
 	if err != nil {
 		log.Fatalf("Failed to initialize runtime: %v", err)
 	}
 	defer rt.Close()
 
-	log.Printf("Runtime initialized successfully: %s\n", runtimeType)
+	log.Printf("Runtime initialized successfully: %s\n", runtimeTypeStr)
 
 	// 创建 SandboxManager
 	sandboxManager := runtime.NewSandboxManager(rt)

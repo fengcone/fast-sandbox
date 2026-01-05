@@ -6,11 +6,34 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// RuntimeType defines the isolation level for sandboxes in this pool.
+
+type RuntimeType string
+
+
+
+const (
+
+	RuntimeContainer   RuntimeType = "container"
+
+	RuntimeFirecracker RuntimeType = "firecracker"
+
+)
+
+
+
 // SandboxPoolSpec defines the desired state of SandboxPool.
+
 type SandboxPoolSpec struct {
-	Capacity             PoolCapacity           `json:"capacity"`
-	MaxSandboxesPerPod   int32                  `json:"maxSandboxesPerPod,omitempty"`
-	AgentTemplate        corev1.PodTemplateSpec `json:"agentTemplate"`
+
+	Capacity           PoolCapacity           `json:"capacity"`
+
+	MaxSandboxesPerPod int32                  `json:"maxSandboxesPerPod,omitempty"`
+
+	RuntimeType        RuntimeType            `json:"runtimeType,omitempty"`
+
+	AgentTemplate      corev1.PodTemplateSpec `json:"agentTemplate"`
+
 }
 
 // PoolCapacity describes the sizing policy of the agent pool.

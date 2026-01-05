@@ -1,0 +1,9 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: vm-sandbox
+  namespace: default
+spec:
+  image: docker.io/fast-sandbox/agent:dev
+  command: ["/bin/sleep", "3600"]
+  poolRef: vm-pool

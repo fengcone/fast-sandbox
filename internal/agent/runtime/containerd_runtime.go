@@ -135,13 +135,9 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 
 	// 1. 确保镜像存在
-	image, err := r.client.GetImage(ctx, config.Image)
+	image, err := r.prepareImage(ctx, config.Image)
 	if err != nil {
-		// 尝试拉取镜像
-		image, err = r.client.Pull(ctx, config.Image, containerd.WithPullUnpack)
-		if err != nil {
-			return nil, fmt.Errorf("failed to pull image %s: %w", config.Image, err)
-		}
+		return nil, err
 	}
 
 	// 2. 生成 Container ID
@@ -151,37 +147,12 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 	}
 
 	// 3. 准备 OCI Spec
-	specOpts := []oci.SpecOpts{
-		oci.WithImageConfig(image),
-		oci.WithProcessArgs(append(config.Command, config.Args...)...),
-		oci.WithEnv(envMapToSlice(config.Env)),
-	}
-
-	// 共享 Agent Pod 的网络空间
-	if r.netnsPath != "" {
-		specOpts = append(specOpts, oci.WithLinuxNamespace(specs.LinuxNamespace{
-			Type: specs.NetworkNamespace,
-			Path: r.netnsPath,
-		}))
-	} else {
-		// 回退方案：如果探测不到，暂时使用宿主机网络 (或者报错)
-		specOpts = append(specOpts, oci.WithHostNamespace(specs.NetworkNamespace))
-	}
-
-	// 如果探测到了父级 Cgroup，则注入子 Cgroup 路径，实现资源嵌套隔离
-	if r.cgroupPath != "" {
-		sandboxCgroup := filepath.Join(r.cgroupPath, "sandbox-"+containerID)
-		specOpts = append(specOpts, oci.WithCgroup(sandboxCgroup))
-	}
+	specOpts := r.prepareSpecOpts(config, image)
 
 	// 4. 创建容器
-	labels := map[string]string{
-		"fast-sandbox.io/managed":   "true",
-		"fast-sandbox.io/id":        config.SandboxID,
-		"fast-sandbox.io/claim-uid": config.ClaimUID,
-		"fast-sandbox.io/claim-nm":  config.ClaimName,
-	}
+	labels := r.prepareLabels(config)
 
+	// 注意：这里留给子类（Firecracker）重写的机会
 	container, err := r.client.NewContainer(
 		ctx,
 		containerID,
@@ -194,22 +165,20 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
-	// 5. 创建 Task
-	// 使用 cio.WithStdio 将容器输出重定向到 Agent 的标准输出，方便调试
+	// 5. 创建并启动 Task
 	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
 	if err != nil {
 		container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
-	// 6. 启动 Task
 	if err := task.Start(ctx); err != nil {
 		task.Delete(ctx)
 		container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
-	// 7. 构建 Metadata
+	// 6. 构建 Metadata
 	metadata := &SandboxMetadata{
 		SandboxID:   config.SandboxID,
 		ClaimUID:    config.ClaimUID,
@@ -226,6 +195,53 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 
 	r.sandboxes[config.SandboxID] = metadata
 	return metadata, nil
+}
+
+// 辅助方法，方便复用
+func (r *ContainerdRuntime) prepareImage(ctx context.Context, imageName string) (containerd.Image, error) {
+	image, err := r.client.GetImage(ctx, imageName)
+	if err != nil {
+		image, err = r.client.Pull(ctx, imageName, containerd.WithPullUnpack)
+		if err != nil {
+			return nil, fmt.Errorf("failed to pull image %s: %w", imageName, err)
+		}
+	}
+	return image, nil
+}
+
+func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image containerd.Image) []oci.SpecOpts {
+	specOpts := []oci.SpecOpts{
+		oci.WithImageConfig(image),
+		oci.WithProcessArgs(append(config.Command, config.Args...)...),
+		oci.WithEnv(envMapToSlice(config.Env)),
+	}
+
+	// 共享 NetNS
+	if r.netnsPath != "" {
+		specOpts = append(specOpts, oci.WithLinuxNamespace(specs.LinuxNamespace{
+			Type: specs.NetworkNamespace,
+			Path: r.netnsPath,
+		}))
+	} else {
+		specOpts = append(specOpts, oci.WithHostNamespace(specs.NetworkNamespace))
+	}
+
+	// Cgroup 嵌套
+	if r.cgroupPath != "" {
+		sandboxCgroup := filepath.Join(r.cgroupPath, "sandbox-"+config.SandboxID)
+		specOpts = append(specOpts, oci.WithCgroup(sandboxCgroup))
+	}
+
+	return specOpts
+}
+
+func (r *ContainerdRuntime) prepareLabels(config *SandboxConfig) map[string]string {
+	return map[string]string{
+		"fast-sandbox.io/managed":   "true",
+		"fast-sandbox.io/id":        config.SandboxID,
+		"fast-sandbox.io/claim-uid": config.ClaimUID,
+		"fast-sandbox.io/claim-nm":  config.ClaimName,
+	}
 }
 
 func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string) error {

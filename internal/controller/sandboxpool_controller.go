@@ -130,6 +130,10 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 				Name:  "AGENT_CAPACITY",
 				Value: fmt.Sprintf("%d", getAgentCapacity(pool)),
 			},
+			corev1.EnvVar{
+				Name:  "RUNTIME_TYPE",
+				Value: string(getRuntimeType(pool)),
+			},
 			corev1.EnvVar{Name: "RUNTIME_SOCKET", Value: "/run/containerd/containerd.sock"},
 		)
 
@@ -139,11 +143,19 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			corev1.VolumeMount{Name: "containerd-root", MountPath: "/var/lib/containerd"},
 			corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"},
 		)
+
+		// Firecracker 模式需要透传 KVM 设备
+		if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
+			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
+				Name:      "kvm",
+				MountPath: "/dev/kvm",
+			})
+		}
 	}
 
 	// 3. Volumes Injection
 	hostPathDirectory := corev1.HostPathDirectory
-	// hostPathSocket := corev1.HostPathSocket // Not used if we mount dir
+	hostPathFile := corev1.HostPathCharDev
 
 	podSpec.Volumes = append(podSpec.Volumes,
 		corev1.Volume{
@@ -159,6 +171,15 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/tmp", Type: &hostPathDirectory}},
 		},
 	)
+
+	if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "kvm",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{Path: "/dev/kvm", Type: &hostPathFile},
+			},
+		})
+	}
 
 	// --- Injection Logic End ---
 
@@ -189,6 +210,13 @@ func getAgentCapacity(pool *apiv1alpha1.SandboxPool) int32 {
 		return pool.Spec.MaxSandboxesPerPod
 	}
 	return 5 // 默认容量
+}
+
+func getRuntimeType(pool *apiv1alpha1.SandboxPool) apiv1alpha1.RuntimeType {
+	if pool.Spec.RuntimeType != "" {
+		return pool.Spec.RuntimeType
+	}
+	return apiv1alpha1.RuntimeContainer // 默认使用普通容器
 }
 
 func boolPtr(b bool) *bool {

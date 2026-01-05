@@ -69,18 +69,15 @@ type Runtime interface {
 type RuntimeType string
 
 const (
-	// RuntimeTypeContainerd containerd 运行时
-	RuntimeTypeContainerd RuntimeType = "containerd"
+	// RuntimeTypeContainerd containerd 运行时 (普通容器)
+	RuntimeTypeContainerd RuntimeType = "container"
 
-	// RuntimeTypeDocker Docker 运行时
-	RuntimeTypeDocker RuntimeType = "docker"
-
-	// RuntimeTypeCRIO CRI-O 运行时
-	RuntimeTypeCRIO RuntimeType = "crio"
+	// RuntimeTypeFirecracker Firecracker VM 运行时 (MicroVM)
+	RuntimeTypeFirecracker RuntimeType = "firecracker"
 )
 
 // NewRuntime 根据类型创建运行时实例
-// runtimeType: 运行时类型（containerd, docker, crio）
+// runtimeType: 运行时类型（container, firecracker）
 // socketPath: 运行时 socket 路径
 func NewRuntime(ctx context.Context, runtimeType RuntimeType, socketPath string) (Runtime, error) {
 	var rt Runtime
@@ -88,12 +85,8 @@ func NewRuntime(ctx context.Context, runtimeType RuntimeType, socketPath string)
 	switch runtimeType {
 	case RuntimeTypeContainerd:
 		rt = &ContainerdRuntime{}
-	case RuntimeTypeDocker:
-		// TODO: 实现 Docker 运行时
-		panic("Docker runtime not implemented yet")
-	case RuntimeTypeCRIO:
-		// TODO: 实现 CRI-O 运行时
-		panic("CRI-O runtime not implemented yet")
+	case RuntimeTypeFirecracker:
+		rt = &FirecrackerRuntime{}
 	default:
 		return nil, ErrUnsupportedRuntime
 	}
