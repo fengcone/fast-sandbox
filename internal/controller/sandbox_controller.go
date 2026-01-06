@@ -36,22 +36,18 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// 1. Check if assigned
 	if sandbox.Status.AssignedPod == "" {
-		// Schedule it
-		agent, err := r.schedule(sandbox)
-		if err != nil {
-			logger.Error(err, "Failed to schedule sandbox")
-			// TODO: Update condition to specific why
-			return ctrl.Result{Requeue: true}, nil
-		}
+		return r.handleScheduling(ctx, &sandbox)
+	}
 
-		sandbox.Status.AssignedPod = agent.PodName
-		sandbox.Status.NodeName = agent.NodeName
-		sandbox.Status.Phase = "Bound"
-
+	// 1.1 Verify if assigned agent still exists
+	if _, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod)); !ok {
+		logger.Info("Assigned agent disappeared, triggering re-scheduling", "agent", sandbox.Status.AssignedPod)
+		sandbox.Status.AssignedPod = ""
+		sandbox.Status.NodeName = ""
+		sandbox.Status.Phase = "Pending"
 		if err := r.Status().Update(ctx, &sandbox); err != nil {
 			return ctrl.Result{}, err
 		}
-		// Requeue to sync immediately
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -68,6 +64,27 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	// Schedule it
+	agent, err := r.schedule(*sandbox)
+	if err != nil {
+		logger.Error(err, "Failed to schedule sandbox")
+		// TODO: Update condition to specific why
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	sandbox.Status.AssignedPod = agent.PodName
+	sandbox.Status.NodeName = agent.NodeName
+	sandbox.Status.Phase = "Bound"
+
+	if err := r.Status().Update(ctx, sandbox); err != nil {
+		return ctrl.Result{}, err
+	}
+	// Requeue to sync immediately
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {

@@ -65,17 +65,3 @@ kind-load-controller:
 	kind load docker-image $(CONTROLLER_IMAGE) --name fast-sandbox || echo "kind cluster 'fast-sandbox' not found or kind not installed"
 
 # Prepare e2e test environment: build and load images to KIND cluster
-e2e-prepare:
-	@echo "Preparing e2e test environment..."
-	@echo "Building and loading Agent image..."
-	@$(MAKE) docker-agent AGENT_IMAGE=fast-sandbox-agent:dev
-	@$(MAKE) kind-load-agent AGENT_IMAGE=fast-sandbox-agent:dev
-	@echo "Building and loading Controller image..."
-	@$(MAKE) docker-controller CONTROLLER_IMAGE=fast-sandbox/controller:dev
-	@$(MAKE) kind-load-controller CONTROLLER_IMAGE=fast-sandbox/controller:dev
-	@echo "E2E test environment prepared successfully"
-
-# Run Ginkgo e2e tests (automatically builds and loads images first)
-e2e: e2e-prepare
-	@echo "Running Ginkgo e2e tests..."
-	go test -v ./test/e2e/... -ginkgo.v

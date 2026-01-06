@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -38,18 +39,28 @@ func (r *FirecrackerRuntime) CreateSandbox(ctx context.Context, config *SandboxC
 	// 注入 Firecracker 特有的配置
 	// 注意：在实际验证环境(如KIND)中，需要确保该路径下有可用的内核镜像
 	kernelPath := "/var/lib/firecracker/vmlinux"
+
 	specOpts = append(specOpts, oci.WithAnnotations(map[string]string{
-		"io.containerd.firecracker.v1.kernel": kernelPath,
+		"io.containerd.firecracker.v1.kernel":        kernelPath,
+		"io.containerd.firecracker.v1.is-fast-clone": "true",
 	}))
 
 	// 3. 创建容器 (指定 Firecracker Runtime)
 	containerID := config.SandboxID
 	labels := r.prepareLabels(config)
 
+	// 支持可配置的 Snapshotter，默认为 devmapper (生产环境标准)
+	snapshotter := os.Getenv("FIRECRACKER_SNAPSHOTTER")
+	if snapshotter == "" {
+		snapshotter = "devmapper"
+	}
+
 	container, err := r.client.NewContainer(
 		ctx,
 		containerID,
 		containerd.WithImage(image),
+		// 关键点：指定使用 snapshotter (Firecracker 需要块设备)
+		containerd.WithSnapshotter(snapshotter),
 		containerd.WithNewSnapshot(containerID+"-snapshot", image),
 		// 关键点：使用完整的运行时处理器名称
 		containerd.WithRuntime("io.containerd.firecracker.v1", nil),
