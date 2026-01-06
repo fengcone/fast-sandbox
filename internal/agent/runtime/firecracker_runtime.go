@@ -9,10 +9,10 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/pkg/oci"
 )
 
 // FirecrackerRuntime 实现基于 Firecracker MicroVM 的运行时
+// 预期生产环境：Linux 物理机 + KVM + Devmapper
 type FirecrackerRuntime struct {
 	ContainerdRuntime
 }
@@ -33,23 +33,14 @@ func (r *FirecrackerRuntime) CreateSandbox(ctx context.Context, config *SandboxC
 		return nil, err
 	}
 
-	// 2. 准备配置并注入 Firecracker 特有的配置
+	// 2. 准备配置 (使用标准的 Containerd 逻辑)
 	specOpts := r.prepareSpecOpts(config, image)
 
-	// 注入 Firecracker 特有的配置
-	// 注意：在实际验证环境(如KIND)中，需要确保该路径下有可用的内核镜像
-	kernelPath := "/var/lib/firecracker/vmlinux"
-
-	specOpts = append(specOpts, oci.WithAnnotations(map[string]string{
-		"io.containerd.firecracker.v1.kernel":        kernelPath,
-		"io.containerd.firecracker.v1.is-fast-clone": "true",
-	}))
-
-	// 3. 创建容器 (指定 Firecracker Runtime)
+	// 3. 创建容器 (指定 Firecracker 运行时)
 	containerID := config.SandboxID
 	labels := r.prepareLabels(config)
 
-	// 支持可配置的 Snapshotter，默认为 devmapper (生产环境标准)
+	// 生产环境下通常使用 devmapper 以支持块设备挂载给 VM
 	snapshotter := os.Getenv("FIRECRACKER_SNAPSHOTTER")
 	if snapshotter == "" {
 		snapshotter = "devmapper"
@@ -59,10 +50,9 @@ func (r *FirecrackerRuntime) CreateSandbox(ctx context.Context, config *SandboxC
 		ctx,
 		containerID,
 		containerd.WithImage(image),
-		// 关键点：指定使用 snapshotter (Firecracker 需要块设备)
 		containerd.WithSnapshotter(snapshotter),
 		containerd.WithNewSnapshot(containerID+"-snapshot", image),
-		// 关键点：使用完整的运行时处理器名称
+		// 显式指定运行时处理器名称
 		containerd.WithRuntime("io.containerd.firecracker.v1", nil),
 		containerd.WithNewSpec(specOpts...),
 		containerd.WithContainerLabels(labels),
@@ -91,9 +81,6 @@ func (r *FirecrackerRuntime) CreateSandbox(ctx context.Context, config *SandboxC
 		ClaimName:   config.ClaimName,
 		ContainerID: containerID,
 		Image:       config.Image,
-		Command:     config.Command,
-		Args:        config.Args,
-		Env:         config.Env,
 		Status:      "running",
 		CreatedAt:   time.Now().Unix(),
 		PID:         int(task.Pid()),
