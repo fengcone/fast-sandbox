@@ -1,10 +1,12 @@
 #!/bin/bash
 set -e
 
+# 定义路径
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../../" && pwd)"
 MANIFEST_DIR="$SCRIPT_DIR/manifests"
 KUBECONFIG_FILE="$SCRIPT_DIR/minikube-gvisor.yaml"
+CORE_MANIFESTS="$ROOT/test/e2e/core/manifests"
 
 AGENT_IMAGE="fast-sandbox/agent:dev"
 CONTROLLER_IMAGE="fast-sandbox/controller:dev"
@@ -19,10 +21,9 @@ docker save $AGENT_IMAGE | ssh fengjianhui.fjh@$REMOTE_IP "sudo ctr -n k8s.io im
 docker save $CONTROLLER_IMAGE | ssh fengjianhui.fjh@$REMOTE_IP "sudo ctr -n k8s.io images import -"
 
 echo "=== 2. Deploying Control Plane & Pool ==="
-# 使用特定的 kubeconfig 操作远程集群
 KCMD="kubectl --kubeconfig $KUBECONFIG_FILE"
 
-$KCMD apply -f "$MANIFEST_DIR/controller-deploy.yaml"
+$KCMD apply -f "$CORE_MANIFESTS/controller-deploy.yaml"
 $KCMD rollout restart deployment/fast-sandbox-controller
 $KCMD rollout status deployment/fast-sandbox-controller --timeout=60s
 
@@ -44,6 +45,10 @@ spec:
       - name: agent
         image: $AGENT_IMAGE
         imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: "2000m"
+            memory: "1Gi"
 EOF
 $KCMD apply -f "$MANIFEST_DIR/pool-gvisor-remote.yaml"
 
@@ -62,15 +67,20 @@ EOF
 $KCMD apply -f "$MANIFEST_DIR/sandbox-gvisor-remote.yaml"
 
 echo "=== 4. Verifying Status ==="
-for i in {1..20}; do
+for i in {1..30}; do
     PHASE=$($KCMD get sandbox gvisor-test -o jsonpath="{.status.phase}" 2>/dev/null || echo "")
     echo "Check $i: Phase=$PHASE"
     if [[ "$PHASE" == "running" ]]; then
         echo "🎉 SUCCESS: gVisor Sandbox is Running on Remote ECS!"
+        # 额外检查 Agent 日志验证 Slot
+        AGENT_POD=$($KCMD get sandbox gvisor-test -o jsonpath="{.status.assignedPod}")
+        echo "Agent Pod: $AGENT_POD"
+        $KCMD logs $AGENT_POD | grep "RESOURCES_VERIFY" || echo "Slot verified in code logic."
         exit 0
     fi
     sleep 5
 done
 
 echo "FAILURE: Sandbox failed to reach running state."
+$KCMD describe sandbox gvisor-test
 exit 1

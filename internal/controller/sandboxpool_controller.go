@@ -152,6 +152,14 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 				ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
 			},
 			corev1.EnvVar{
+				Name:      "CPU_LIMIT",
+				ValueFrom: &corev1.EnvVarSource{ResourceFieldRef: &corev1.ResourceFieldSelector{ContainerName: "agent", Resource: "limits.cpu"}},
+			},
+			corev1.EnvVar{
+				Name:      "MEMORY_LIMIT",
+				ValueFrom: &corev1.EnvVarSource{ResourceFieldRef: &corev1.ResourceFieldSelector{ContainerName: "agent", Resource: "limits.memory"}},
+			},
+			corev1.EnvVar{
 				Name:  "AGENT_CAPACITY",
 				Value: fmt.Sprintf("%d", getAgentCapacity(pool)),
 			},
