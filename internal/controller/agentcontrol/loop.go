@@ -27,7 +27,7 @@ func NewLoop(c client.Client, reg agentpool.AgentRegistry, agentClient *api.Agen
 		Client:      c,
 		Registry:    reg,
 		AgentClient: agentClient,
-		Interval:    5 * time.Second,
+		Interval:    2 * time.Second,
 	}
 }
 

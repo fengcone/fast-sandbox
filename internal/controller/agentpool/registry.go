@@ -80,6 +80,7 @@ func (r *InMemoryRegistry) AllocateSlot(id AgentID) bool {
 	if !ok {
 		return false
 	}
+	// 容量检查
 	if a.Capacity > 0 && a.Allocated >= a.Capacity {
 		return false
 	}
