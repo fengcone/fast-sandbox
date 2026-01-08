@@ -1,0 +1,11 @@
+# Build stage
+FROM golang:1.25-alpine AS builder
+WORKDIR /workspace
+COPY bin/janitor .
+
+# Final stage
+FROM alpine:3.19
+WORKDIR /workspace
+COPY --from=builder /workspace/janitor .
+
+ENTRYPOINT ["./janitor"]

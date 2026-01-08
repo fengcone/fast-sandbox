@@ -2,29 +2,28 @@
 REGISTRY ?= fast-sandbox
 AGENT_IMAGE ?= $(REGISTRY)/agent:dev
 CONTROLLER_IMAGE ?= $(REGISTRY)/controller:dev
+JANITOR_IMAGE ?= $(REGISTRY)/janitor:dev
 
 # Go settings
 GO ?= go
 GOFLAGS ?= -gcflags="all=-N -l"
 
-.PHONY: all build build-controller build-agent build-agent-linux build-controller-linux test tidy e2e e2e-prepare docker-agent docker-controller kind-load-agent kind-load-controller help
+.PHONY: all build build-controller build-agent build-janitor build-agent-linux build-controller-linux build-janitor-linux test tidy e2e docker-agent docker-controller docker-janitor kind-load-agent kind-load-controller kind-load-janitor help
 
 all: build
 
 help:
 	@echo "Common targets:"
-	@echo "  make build                  - build controller and agent binaries"
+	@echo "  make build                  - build all binaries"
 	@echo "  make build-agent-linux      - build agent binary for linux/amd64"
 	@echo "  make build-controller-linux - build controller binary for linux/amd64"
-	@echo "  make test                   - run unit tests (go test ./...)"
-	@echo "  make e2e                    - run Ginkgo e2e tests (fully automated)"
-	@echo "  make e2e-shell              - run legacy shell-based e2e test"
-	@echo "  make docker-agent           - build agent container image"
-	@echo "  make docker-controller      - build controller container image"
-	@echo "  make kind-load-agent        - load agent image into kind cluster 'fast-sandbox'"
-	@echo "  make kind-load-controller   - load controller image into kind cluster 'fast-sandbox'"
+	@echo "  make build-janitor-linux    - build janitor binary for linux/amd64"
+	@echo "  make test                   - run unit tests"
+	@echo "  make docker-agent           - build agent image"
+	@echo "  make docker-controller      - build controller image"
+	@echo "  make docker-janitor         - build janitor image"
 
-build: build-controller build-agent
+build: build-controller build-agent build-janitor
 
 build-controller:
 	$(GO) build $(GOFLAGS) -o bin/controller ./cmd/controller
@@ -32,15 +31,21 @@ build-controller:
 build-agent:
 	$(GO) build $(GOFLAGS) -o bin/agent ./cmd/agent
 
-# Cross-compile agent for linux/amd64 (for docker image)
+build-janitor:
+	$(GO) build $(GOFLAGS) -o bin/janitor ./cmd/janitor
+
+# Cross-compile for linux/amd64 (for docker images)
 build-agent-linux:
 	@mkdir -p bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/agent ./cmd/agent
 
-# Cross-compile controller for linux/amd64 (for docker image)
 build-controller-linux:
 	@mkdir -p bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/controller ./cmd/controller
+
+build-janitor-linux:
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/janitor ./cmd/janitor
 
 test:
 	$(GO) test $(GOFLAGS) ./...
@@ -48,20 +53,20 @@ test:
 tidy:
 	$(GO) mod tidy
 
-# Build the agent image (requires bin/agent to be built for linux/amd64)
 docker-agent: build-agent-linux
 	docker build -t $(AGENT_IMAGE) -f build/Dockerfile.agent .
 
-# Build the controller image (requires bin/controller to be built for linux/amd64)
 docker-controller: build-controller-linux
 	docker build -t $(CONTROLLER_IMAGE) -f build/Dockerfile.controller .
 
-# Load the agent image into the local kind cluster for testing
+docker-janitor: build-janitor-linux
+	docker build -t $(JANITOR_IMAGE) -f build/Dockerfile.janitor .
+
 kind-load-agent:
-	kind load docker-image $(AGENT_IMAGE) --name fast-sandbox || echo "kind cluster 'fast-sandbox' not found or kind not installed"
+	kind load docker-image $(AGENT_IMAGE) --name fast-sandbox
 
-# Load the controller image into the local kind cluster for testing
 kind-load-controller:
-	kind load docker-image $(CONTROLLER_IMAGE) --name fast-sandbox || echo "kind cluster 'fast-sandbox' not found or kind not installed"
+	kind load docker-image $(CONTROLLER_IMAGE) --name fast-sandbox
 
-# Prepare e2e test environment: build and load images to KIND cluster
+kind-load-janitor:
+	kind load docker-image $(JANITOR_IMAGE) --name fast-sandbox

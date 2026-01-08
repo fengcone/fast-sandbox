@@ -94,6 +94,12 @@ rules:
   resources: ["sandboxes", "sandboxpools", "sandboxes/status", "sandboxpools/status"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fast-sandbox-manager-role
+  namespace: default
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -104,7 +110,7 @@ roleRef:
   name: fast-sandbox-manager-role
 subjects:
 - kind: ServiceAccount
-  name: default
+  name: fast-sandbox-manager-role
   namespace: default
 ---
 apiVersion: apps/v1
@@ -124,7 +130,12 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
+      serviceAccountName: fast-sandbox-manager-role
       containers:
       - name: manager
         image: fast-sandbox/controller:dev
         imagePullPolicy: IfNotPresent
+        command:
+        - ./controller
+        - --metrics-bind-address=:0
+        - --health-probe-bind-address=:8081
