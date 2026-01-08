@@ -35,6 +35,23 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// 0. 自动过期清理逻辑 (ExpireTime GC)
+	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
+		now := time.Now().UTC()
+		expireAt := sandbox.Spec.ExpireTime.UTC()
+		
+		if now.After(expireAt) || now.Equal(expireAt) {
+			logger.Info("Sandbox expired, deleting", 
+				"name", sandbox.Name, 
+				"now", now.Format(time.RFC3339), 
+				"expireAt", expireAt.Format(time.RFC3339))
+			if err := r.Delete(ctx, &sandbox); err != nil {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// 1. 调度逻辑
 	if sandbox.Status.AssignedPod == "" {
 		// 防御性校验：poolRef 必填
@@ -46,33 +63,48 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			return ctrl.Result{}, nil
 		}
-		return r.handleScheduling(ctx, &sandbox)
+		_, err := r.handleScheduling(ctx, &sandbox)
+		if err != nil {
+			logger.Info("Scheduling pending...", "reason", err.Error())
+		}
+		// 调度后不立即返回，继续执行后面的 Requeue 逻辑以支持过期检查
 	}
 
 	// 1.1 校验绑定的 Agent 是否依然存在
-	if _, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod)); !ok {
-		logger.Info("Assigned agent disappeared, resetting for re-scheduling", "agent", sandbox.Status.AssignedPod)
-		sandbox.Status.AssignedPod = ""
-		sandbox.Status.NodeName = ""
-		sandbox.Status.Phase = "Pending"
-		if err := r.Status().Update(ctx, &sandbox); err != nil {
-			return ctrl.Result{}, err
+	if sandbox.Status.AssignedPod != "" {
+		if _, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod)); !ok {
+			logger.Info("Assigned agent disappeared, resetting for re-scheduling", "agent", sandbox.Status.AssignedPod)
+			sandbox.Status.AssignedPod = ""
+			sandbox.Status.NodeName = ""
+			sandbox.Status.Phase = "Pending"
+			if err := r.Status().Update(ctx, &sandbox); err != nil {
+				return ctrl.Result{}, err
+			}
+			// 状态更新会触发下一次 Reconcile
+			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{Requeue: true}, nil
+
+		// 2. 同步状态到 Agent
+		if err := r.syncAgent(ctx, sandbox.Status.AssignedPod); err != nil {
+			logger.Error(err, "Failed to sync with agent", "agent", sandbox.Status.AssignedPod)
+		}
+
+		// 3. 从 Registry 同步运行状态回 CR (Bound -> Running)
+		if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
+			logger.Error(err, "Failed to update sandbox status")
+		}
 	}
 
-	// 2. 同步状态到 Agent
-	if err := r.syncAgent(ctx, sandbox.Status.AssignedPod); err != nil {
-		logger.Error(err, "Failed to sync with agent", "agent", sandbox.Status.AssignedPod)
-		return ctrl.Result{Requeue: true}, nil
+	// 计算下一次 Requeue 时间
+	nextCheck := 5 * time.Second
+	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
+		remaining := time.Until(sandbox.Spec.ExpireTime.Time)
+		if remaining > 0 && remaining < nextCheck {
+			nextCheck = remaining
+		}
 	}
 
-	// 3. 从 Registry 同步运行状态回 CR (Bound -> Running)
-	if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: nextCheck}, nil
 }
 
 func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
@@ -82,7 +114,8 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 	agent, err := r.schedule(*sandbox)
 	if err != nil {
 		logger.Error(err, "Failed to schedule sandbox")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		// 返回错误但不带 Result，让主循环最后的 RequeueAfter 逻辑生效
+		return ctrl.Result{}, err
 	}
 
 	// 使用 RetryOnConflict 保证状态更新成功

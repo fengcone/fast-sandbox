@@ -22,7 +22,9 @@ type SandboxSpec struct {
 	Envs       []corev1.EnvVar `json:"envs,omitempty"`
 	WorkingDir string          `json:"workingDir,omitempty"`
 
-	TTLSeconds *int32 `json:"ttlSeconds,omitempty"`
+	// ExpireTime specifies when this sandbox should expire and be garbage collected.
+	// If not set, the sandbox will not expire automatically.
+	ExpireTime *metav1.Time `json:"expireTime,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// PoolRef specifies which SandboxPool this sandbox should be scheduled to.

@@ -1,0 +1,17 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxPool
+metadata:
+  name: autoscale-pool
+  namespace: default
+spec:
+  capacity:
+    poolMin: 1
+    poolMax: 2
+  maxSandboxesPerPod: 5
+  runtimeType: container
+  agentTemplate:
+    spec:
+      containers:
+      - name: agent
+        image: fast-sandbox/agent:dev
+        imagePullPolicy: IfNotPresent

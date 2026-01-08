@@ -25,6 +25,7 @@ spec:
               command: {type: array, items: {type: string}}
               args: {type: array, items: {type: string}}
               poolRef: {type: string}
+              expireTime: {type: string, format: date-time}
           status:
             type: object
             properties:
