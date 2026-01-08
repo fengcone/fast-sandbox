@@ -23,7 +23,11 @@ type SandboxSpec struct {
 	WorkingDir string          `json:"workingDir,omitempty"`
 
 	TTLSeconds *int32 `json:"ttlSeconds,omitempty"`
-	PoolRef    string `json:"poolRef,omitempty"`
+
+	// +kubebuilder:validation:Required
+	// PoolRef specifies which SandboxPool this sandbox should be scheduled to.
+	// This field is required.
+	PoolRef string `json:"poolRef"`
 }
 
 // SandboxStatus defines the observed state of Sandbox.

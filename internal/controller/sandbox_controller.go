@@ -11,6 +11,7 @@ import (
 	"fast-sandbox/internal/controller/agentpool"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -34,14 +35,23 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 1. Check if assigned
+	// 1. 调度逻辑
 	if sandbox.Status.AssignedPod == "" {
+		// 防御性校验：poolRef 必填
+		if sandbox.Spec.PoolRef == "" {
+			logger.Error(nil, "poolRef is required but empty")
+			sandbox.Status.Phase = "Failed"
+			if err := r.Status().Update(ctx, &sandbox); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
 		return r.handleScheduling(ctx, &sandbox)
 	}
 
-	// 1.1 Verify if assigned agent still exists
+	// 1.1 校验绑定的 Agent 是否依然存在
 	if _, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod)); !ok {
-		logger.Info("Assigned agent disappeared, triggering re-scheduling", "agent", sandbox.Status.AssignedPod)
+		logger.Info("Assigned agent disappeared, resetting for re-scheduling", "agent", sandbox.Status.AssignedPod)
 		sandbox.Status.AssignedPod = ""
 		sandbox.Status.NodeName = ""
 		sandbox.Status.Phase = "Pending"
@@ -51,15 +61,14 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// 2. Sync with Agent
+	// 2. 同步状态到 Agent
 	if err := r.syncAgent(ctx, sandbox.Status.AssignedPod); err != nil {
 		logger.Error(err, "Failed to sync with agent", "agent", sandbox.Status.AssignedPod)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// 3. Update Status from Registry
+	// 3. 从 Registry 同步运行状态回 CR (Bound -> Running)
 	if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
-		logger.Error(err, "Failed to update sandbox status")
 		return ctrl.Result{}, err
 	}
 
@@ -68,22 +77,33 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	// Schedule it
+
+	// 实时调度
 	agent, err := r.schedule(*sandbox)
 	if err != nil {
 		logger.Error(err, "Failed to schedule sandbox")
-		// TODO: Update condition to specific why
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	sandbox.Status.AssignedPod = agent.PodName
-	sandbox.Status.NodeName = agent.NodeName
-	sandbox.Status.Phase = "Bound"
+	// 使用 RetryOnConflict 保证状态更新成功
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		if latest.Status.AssignedPod != "" {
+			return nil // 已经被调度了
+		}
+		latest.Status.AssignedPod = agent.PodName
+		latest.Status.NodeName = agent.NodeName
+		latest.Status.Phase = "Bound"
+		return r.Status().Update(ctx, latest)
+	})
 
-	if err := r.Status().Update(ctx, sandbox); err != nil {
+	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// Requeue to sync immediately
+
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -109,20 +129,34 @@ func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.Ag
 		return nil, fmt.Errorf("no agents available")
 	}
 
-	// Filter & Score
+	// 1. 实时统计已占用的插槽 (Bypass Registry Memory)
+	var allSandboxes apiv1alpha1.SandboxList
+	if err := r.List(context.Background(), &allSandboxes); err != nil {
+		return nil, err
+	}
+	usedMap := make(map[string]int)
+	for _, sb := range allSandboxes.Items {
+		if sb.Status.AssignedPod != "" && sb.Name != sandbox.Name {
+			usedMap[sb.Status.AssignedPod]++
+		}
+	}
+
+	// 2. 过滤与打分
 	var candidates []agentpool.AgentInfo
 	for _, a := range agents {
-		// Pool Filtering
-		if sandbox.Spec.PoolRef != "" {
-			if a.PoolName != sandbox.Spec.PoolRef {
-				continue
-			}
-		}
-
-		// Capacity check
-		if a.Allocated >= a.Capacity {
+		// Pool 匹配（poolRef 必填，必须精确匹配）
+		if a.PoolName != sandbox.Spec.PoolRef {
 			continue
 		}
+
+		// 容量检查 (基于实时统计)
+		allocated := usedMap[a.PodName]
+		if allocated >= a.Capacity {
+			continue
+		}
+		
+		// 临时更新用于排序的 Allocated
+		a.Allocated = allocated
 		candidates = append(candidates, a)
 	}
 
@@ -130,7 +164,7 @@ func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.Ag
 		return nil, fmt.Errorf("insufficient capacity")
 	}
 
-	// Simple scoring: Prefer image locality, then least allocated
+	// 3. 排序：镜像亲和性优先，然后负载最低优先
 	sort.Slice(candidates, func(i, j int) bool {
 		scoreI := scoreAgent(candidates[i], sandbox)
 		scoreJ := scoreAgent(candidates[j], sandbox)
@@ -140,20 +174,11 @@ func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.Ag
 		return candidates[i].Allocated < candidates[j].Allocated
 	})
 
-	// Pick best
-	selected := candidates[0]
-
-	// Update Registry allocation immediately (optimistic locking)
-	if !r.Registry.AllocateSlot(selected.ID) {
-		return nil, fmt.Errorf("failed to allocate slot (race condition)")
-	}
-
-	return &selected, nil
+	return &candidates[0], nil
 }
 
 func scoreAgent(agent agentpool.AgentInfo, sandbox apiv1alpha1.Sandbox) int {
 	score := 0
-	// Image affinity
 	for _, img := range agent.Images {
 		if img == sandbox.Spec.Image {
 			score += 100
@@ -164,35 +189,25 @@ func scoreAgent(agent agentpool.AgentInfo, sandbox apiv1alpha1.Sandbox) int {
 }
 
 func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) error {
-	log := log.FromContext(ctx)
-	log.Info("Syncing agent", "agent", agentPodName)
-
-	// 1. Get Agent Info
 	agentID := agentpool.AgentID(agentPodName)
 	agentInfo, ok := r.Registry.GetAgentByID(agentID)
 	if !ok {
 		return fmt.Errorf("agent %s not found in registry", agentPodName)
 	}
 
-	// 2. List all sandboxes assigned to this agent
 	var sandboxList apiv1alpha1.SandboxList
 	if err := r.List(ctx, &sandboxList, client.MatchingFields{"status.assignedPod": agentPodName}); err != nil {
 		return err
 	}
-	
-	log.Info("Found sandboxes for agent", "agent", agentPodName, "count", len(sandboxList.Items))
 
 	var specs []api.SandboxSpec
 	for _, sb := range sandboxList.Items {
-		// Convert to Spec
 		envs := make(map[string]string)
 		for _, e := range sb.Spec.Envs {
 			envs[e.Name] = e.Value
 		}
-		// Memory/CPU handling can be added here
-
 		specs = append(specs, api.SandboxSpec{
-			SandboxID: sb.Name, // Use CR Name as ID
+			SandboxID: sb.Name,
 			ClaimUID:  string(sb.UID),
 			ClaimName: sb.Name,
 			Image:     sb.Spec.Image,
@@ -202,7 +217,6 @@ func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) 
 		})
 	}
 
-	// 3. Call Agent
 	req := &api.SandboxesRequest{
 		AgentID:      agentPodName,
 		SandboxSpecs: specs,
@@ -214,7 +228,6 @@ func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Index status.assignedPod for efficient lookup
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1alpha1.Sandbox{}, "status.assignedPod", func(rawObj client.Object) []string {
 		sandbox := rawObj.(*apiv1alpha1.Sandbox)
 		if sandbox.Status.AssignedPod == "" {

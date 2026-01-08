@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller/agentpool"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -22,93 +24,116 @@ type SandboxPoolReconciler struct {
 	Registry agentpool.AgentRegistry
 }
 
-// Reconcile currently manages SandboxPool pods and updates status.
+// Reconcile manages the lifecycle of Agent Pods based on the demand from Sandboxes.
 func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
 	var pool apiv1alpha1.SandboxPool
 	if err := r.Get(ctx, req.NamespacedName, &pool); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 1. List Child Pods managed by this pool
+	// 1. 获取该 Pool 下所有的 Agent Pods
 	var childPods corev1.PodList
 	if err := r.List(ctx, &childPods, client.InNamespace(req.Namespace), client.MatchingLabels(poolLabels(pool.Name))); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// 2. Update Status (Simple count)
-	// In a real implementation, we should count Ready/Running pods
-	// pool.Status.CurrentPods = int32(len(childPods.Items))
-	// r.Status().Update(ctx, &pool)
+	// 2. 获取该 Pool 下所有的 Sandboxes，用于计算负载
+	var allSandboxes apiv1alpha1.SandboxList
+	if err := r.List(ctx, &allSandboxes, client.InNamespace(req.Namespace)); err != nil {
+		return ctrl.Result{}, err
+	}
 
-	// 3. Scaling Logic (Ensure Min Capacity)
-	targetCount := int(pool.Spec.Capacity.PoolMin)
-	currentCount := len(childPods.Items)
+	var activeCount, pendingCount int32
+	for _, sb := range allSandboxes.Items {
+		// 只有属于这个池子的才统计
+		if sb.Spec.PoolRef == pool.Name {
+			if sb.Status.AssignedPod != "" {
+				activeCount++
+			} else {
+				pendingCount++
+			}
+		}
+	}
+	logger.Info("Load statistics", "pool", pool.Name, "active", activeCount, "pending", pendingCount)
 
-	if currentCount < targetCount {
-		// Scale Up
-		diff := targetCount - currentCount
-		log.Info("Scaling up agent pool", "pool", pool.Name, "current", currentCount, "target", targetCount, "diff", diff)
+	// 3. 动态计算所需 Pod 数量
+	maxPerPod := getAgentCapacity(&pool)
+	if maxPerPod <= 0 {
+		maxPerPod = 1
+	}
+	
+	// 总需求量 = 正在跑的 + 正在排队的 + 最小缓冲区
+	totalNeededSlots := activeCount + pendingCount + pool.Spec.Capacity.BufferMin
+	desiredPods := (totalNeededSlots + maxPerPod - 1) / maxPerPod
 
-		for i := 0; i < diff; i++ {
+	// 4. 应用 PoolMin / PoolMax 约束
+	if desiredPods < pool.Spec.Capacity.PoolMin {
+		desiredPods = pool.Spec.Capacity.PoolMin
+	}
+	if pool.Spec.Capacity.PoolMax > 0 && desiredPods > pool.Spec.Capacity.PoolMax {
+		desiredPods = pool.Spec.Capacity.PoolMax
+	}
+
+	currentCount := int32(len(childPods.Items))
+	logger.Info("Scaling analysis", "pool", pool.Name, "current", currentCount, "desired", desiredPods)
+
+	// 5. 执行扩缩容
+	if currentCount < desiredPods {
+		diff := desiredPods - currentCount
+		logger.Info("Scaling up agent pool", "diff", diff)
+		for i := int32(0); i < diff; i++ {
 			pod := r.constructPod(&pool)
 			if err := r.Create(ctx, pod); err != nil {
-				log.Error(err, "Failed to create agent pod", "pool", pool.Name)
+				logger.Error(err, "Failed to create agent pod")
 				return ctrl.Result{}, err
 			}
 		}
-	} else if currentCount > targetCount {
-		// Scale Down (Simple: delete extra pods)
-		// TODO: Implement smarter scale down (prefer idle agents)
-		diff := currentCount - targetCount
-		log.Info("Scaling down agent pool", "pool", pool.Name, "current", currentCount, "target", targetCount, "diff", diff)
-
-		// Delete last N pods for now
-		for i := 0; i < diff; i++ {
+	} else if currentCount > desiredPods {
+		diff := currentCount - desiredPods
+		logger.Info("Scaling down agent pool", "diff", diff)
+		// 简单删除
+		for i := int32(0); i < diff; i++ {
 			pod := childPods.Items[i]
 			if err := r.Delete(ctx, &pod); err != nil {
-				log.Error(err, "Failed to delete agent pod", "pod", pod.Name)
+				logger.Error(err, "Failed to delete agent pod", "pod", pod.Name)
 				return ctrl.Result{}, err
 			}
 		}
 	}
 
-	return ctrl.Result{}, nil
+	// 6. 更新 Status
+	pool.Status.CurrentPods = currentCount
+	pool.Status.TotalAgents = currentCount
+	if err := r.Status().Update(ctx, &pool); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 // constructPod builds an Agent Pod from the template with necessary runtime configurations injected.
 func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *corev1.Pod {
 	labels := make(map[string]string)
-	// Copy labels from template
 	for k, v := range pool.Spec.AgentTemplate.ObjectMeta.Labels {
 		labels[k] = v
 	}
-	// Add controller management labels
 	for k, v := range poolLabels(pool.Name) {
 		labels[k] = v
 	}
 
-	// Deep copy spec to avoid mutating cache
 	podSpec := pool.Spec.AgentTemplate.Spec.DeepCopy()
+	podSpec.HostNetwork = false
+	podSpec.HostPID = false // 禁用宿主机 PID 命名空间，提高安全性
 
-	// --- Injection Logic Start ---
-
-	// 1. Network Namespace (HostPID removed for security)
-	podSpec.HostNetwork = false // 禁用宿主机网络，使用 Pod 独立网络
-
-	// 2. Containers Injection
 	if len(podSpec.Containers) > 0 {
-		// Inject into the first container (assumed to be the agent)
 		c := &podSpec.Containers[0]
-
-		// Security Context
 		if c.SecurityContext == nil {
 			c.SecurityContext = &corev1.SecurityContext{}
 		}
 		c.SecurityContext.Privileged = boolPtr(true)
 
-		// Environment Variables
 		c.Env = append(c.Env,
 			corev1.EnvVar{
 				Name:      "NODE_NAME",
@@ -137,14 +162,12 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			corev1.EnvVar{Name: "RUNTIME_SOCKET", Value: "/run/containerd/containerd.sock"},
 		)
 
-		// Volume Mounts
 		c.VolumeMounts = append(c.VolumeMounts,
 			corev1.VolumeMount{Name: "containerd-run", MountPath: "/run/containerd"},
 			corev1.VolumeMount{Name: "containerd-root", MountPath: "/var/lib/containerd"},
 			corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"},
 		)
 
-		// Firecracker 模式需要透传 KVM 设备
 		if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
 			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
 				Name:      "kvm",
@@ -153,7 +176,6 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 		}
 	}
 
-	// 3. Volumes Injection
 	hostPathDirectory := corev1.HostPathDirectory
 	hostPathFile := corev1.HostPathCharDev
 
@@ -181,8 +203,6 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 		})
 	}
 
-	// --- Injection Logic End ---
-
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: pool.Name + "-agent-",
@@ -192,16 +212,14 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 		Spec: *podSpec,
 	}
 
-	// Set Owner Reference
 	ctrl.SetControllerReference(pool, pod, r.Scheme)
-
 	return pod
 }
 
 func poolLabels(poolName string) map[string]string {
 	return map[string]string{
 		"fast-sandbox.io/pool": poolName,
-		"app":                  "sandbox-agent", // Standard label for agent discovery
+		"app":                  "sandbox-agent",
 	}
 }
 
@@ -209,14 +227,14 @@ func getAgentCapacity(pool *apiv1alpha1.SandboxPool) int32 {
 	if pool.Spec.MaxSandboxesPerPod > 0 {
 		return pool.Spec.MaxSandboxesPerPod
 	}
-	return 5 // 默认容量
+	return 5
 }
 
 func getRuntimeType(pool *apiv1alpha1.SandboxPool) apiv1alpha1.RuntimeType {
 	if pool.Spec.RuntimeType != "" {
 		return pool.Spec.RuntimeType
 	}
-	return apiv1alpha1.RuntimeContainer // 默认使用普通容器
+	return apiv1alpha1.RuntimeContainer
 }
 
 func boolPtr(b bool) *bool {
@@ -228,5 +246,18 @@ func (r *SandboxPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1alpha1.SandboxPool{}).
 		Owns(&corev1.Pod{}).
+		Watches(&apiv1alpha1.Sandbox{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			sandbox, ok := obj.(*apiv1alpha1.Sandbox)
+			if !ok {
+				return nil
+			}
+			// 对于删除事件，obj 仍然包含被删除对象的信息
+			if sandbox.Spec.PoolRef != "" {
+				return []ctrl.Request{
+					{NamespacedName: client.ObjectKey{Name: sandbox.Spec.PoolRef, Namespace: sandbox.Namespace}},
+				}
+			}
+			return nil
+		})).
 		Complete(r)
 }
