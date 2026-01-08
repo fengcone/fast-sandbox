@@ -1,9 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: gvisor-sandbox-test
-  namespace: default
-spec:
-  image: registry.cn-hangzhou.aliyuncs.com/google_containers/pause:3.9
-  command: ["/pause"]
-  poolRef: gvisor-pool

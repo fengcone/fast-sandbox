@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fast-sandbox-controller
+  namespace: default
+  labels:
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      serviceAccountName: fast-sandbox-manager-role
+      containers:
+      - name: manager
+        image: fast-sandbox/controller:dev
+        imagePullPolicy: IfNotPresent
+        command:
+        - ./controller
+        - --metrics-bind-address=:0
+        - --health-probe-bind-address=:8081

@@ -1,9 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: sb-janitor-target
-  namespace: default
-spec:
-  image: docker.io/library/alpine:latest
-  command: ["/bin/sleep", "3600"]
-  poolRef: janitor-pool
