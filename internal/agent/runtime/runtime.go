@@ -74,10 +74,13 @@ const (
 
 	// RuntimeTypeFirecracker Firecracker VM 运行时 (MicroVM)
 	RuntimeTypeFirecracker RuntimeType = "firecracker"
+
+	// RuntimeTypeGVisor gVisor 运行时 (安全容器)
+	RuntimeTypeGVisor RuntimeType = "gvisor"
 )
 
 // NewRuntime 根据类型创建运行时实例
-// runtimeType: 运行时类型（container, firecracker）
+// runtimeType: 运行时类型（container, firecracker, gvisor）
 // socketPath: 运行时 socket 路径
 func NewRuntime(ctx context.Context, runtimeType RuntimeType, socketPath string) (Runtime, error) {
 	var rt Runtime
@@ -87,6 +90,8 @@ func NewRuntime(ctx context.Context, runtimeType RuntimeType, socketPath string)
 		rt = &ContainerdRuntime{}
 	case RuntimeTypeFirecracker:
 		rt = &FirecrackerRuntime{}
+	case RuntimeTypeGVisor:
+		rt = &GVisorRuntime{}
 	default:
 		return nil, ErrUnsupportedRuntime
 	}

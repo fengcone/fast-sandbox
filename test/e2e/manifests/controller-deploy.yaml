@@ -120,6 +120,7 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
+      hostNetwork: true
       containers:
       - name: manager
         image: fast-sandbox/controller:dev

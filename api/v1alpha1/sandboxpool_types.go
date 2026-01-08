@@ -10,30 +10,22 @@ import (
 
 type RuntimeType string
 
-
-
 const (
-
 	RuntimeContainer   RuntimeType = "container"
-
 	RuntimeFirecracker RuntimeType = "firecracker"
-
+	RuntimeGVisor      RuntimeType = "gvisor"
 )
-
-
 
 // SandboxPoolSpec defines the desired state of SandboxPool.
 
 type SandboxPoolSpec struct {
+	Capacity PoolCapacity `json:"capacity"`
 
-	Capacity           PoolCapacity           `json:"capacity"`
+	MaxSandboxesPerPod int32 `json:"maxSandboxesPerPod,omitempty"`
 
-	MaxSandboxesPerPod int32                  `json:"maxSandboxesPerPod,omitempty"`
+	RuntimeType RuntimeType `json:"runtimeType,omitempty"`
 
-	RuntimeType        RuntimeType            `json:"runtimeType,omitempty"`
-
-	AgentTemplate      corev1.PodTemplateSpec `json:"agentTemplate"`
-
+	AgentTemplate corev1.PodTemplateSpec `json:"agentTemplate"`
 }
 
 // PoolCapacity describes the sizing policy of the agent pool.

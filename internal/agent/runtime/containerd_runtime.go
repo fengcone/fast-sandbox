@@ -87,16 +87,28 @@ func (r *ContainerdRuntime) discoverCgroupPath() error {
 
 func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
 	// 1. 从 cgroup 路径中尝试提取容器 ID
-	// 典型路径: /kubelet.slice/kubelet-kubepods.slice/.../cri-containerd-<ID>.scope
 	if r.cgroupPath == "" {
 		return fmt.Errorf("cgroup path is required to discover container ID")
 	}
 
-	parts := strings.Split(r.cgroupPath, "cri-containerd-")
-	if len(parts) < 2 {
+	// 兼容多种路径格式：
+	// cgroupfs (legacy): /kubepods.slice/kubepods-besteffort.slice/.../cri-containerd-<ID>.scope
+	// systemd:  /...slice:cri-containerd:<ID>
+	// cgroupfs (modern): /kubepods/besteffort/pod<UID>/<ID>
+	var containerID string
+	if strings.Contains(r.cgroupPath, "cri-containerd-") {
+		parts := strings.Split(r.cgroupPath, "cri-containerd-")
+		containerID = strings.Split(parts[1], ".")[0]
+	} else if strings.Contains(r.cgroupPath, "cri-containerd:") {
+		parts := strings.Split(r.cgroupPath, "cri-containerd:")
+		containerID = parts[len(parts)-1]
+	} else if strings.Contains(r.cgroupPath, "kubepods") {
+		// 处理 /kubepods/besteffort/pod.../<ID> 格式
+		parts := strings.Split(strings.Trim(r.cgroupPath, "/"), "/")
+		containerID = parts[len(parts)-1]
+	} else {
 		return fmt.Errorf("could not parse container ID from cgroup path: %s", r.cgroupPath)
 	}
-	containerID := strings.Split(parts[1], ".")[0]
 
 	// 2. 从 containerd 获取容器信息
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")

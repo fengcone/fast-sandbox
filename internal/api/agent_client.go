@@ -17,7 +17,7 @@ type AgentClient struct {
 func NewAgentClient() *AgentClient {
 	return &AgentClient{
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 	}
 }
