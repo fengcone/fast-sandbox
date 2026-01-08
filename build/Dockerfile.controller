@@ -1,9 +1,13 @@
-FROM golang:1.25
-
+# Build stage
+FROM golang:1.25-alpine AS builder
 WORKDIR /workspace
 COPY bin/controller .
 
-# Controller 监听端口
-EXPOSE 9090 8080
+# Final stage
+FROM alpine:3.19
+WORKDIR /workspace
+COPY --from=builder /workspace/controller .
 
+EXPOSE 9090 8080
 ENTRYPOINT ["./controller"]
+
