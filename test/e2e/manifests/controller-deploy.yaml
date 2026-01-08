@@ -75,6 +75,9 @@ spec:
             properties:
               currentPods: {type: integer}
               readyPods: {type: integer}
+              totalAgents: {type: integer}
+              idleAgents: {type: integer}
+              busyAgents: {type: integer}
     subresources:
       status: {}
 ---

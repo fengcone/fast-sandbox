@@ -25,6 +25,7 @@ type ContainerdRuntime struct {
 	sandboxes  map[string]*SandboxMetadata // sandboxID -> metadata
 	cgroupPath string                      // Pod 的 cgroup 路径
 	netnsPath  string                      // Pod 的 network namespace 路径
+	agentID    string                      // Agent 标识，用于 Sandbox 隔离
 }
 
 // Initialize 初始化 containerd 客户端
@@ -45,6 +46,7 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 
 	r.client = client
 	r.sandboxes = make(map[string]*SandboxMetadata)
+	r.agentID = os.Getenv("POD_NAME") // 使用 Pod 名称作为 Agent 标识
 
 	// 自动探测 Cgroup 路径，用于资源隔离 (Cgroup Nesting)
 	if err := r.discoverCgroupPath(); err != nil {
@@ -250,6 +252,7 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image contain
 func (r *ContainerdRuntime) prepareLabels(config *SandboxConfig) map[string]string {
 	return map[string]string{
 		"fast-sandbox.io/managed":   "true",
+		"fast-sandbox.io/agent-id":  r.agentID,
 		"fast-sandbox.io/id":        config.SandboxID,
 		"fast-sandbox.io/claim-uid": config.ClaimUID,
 		"fast-sandbox.io/claim-nm":  config.ClaimName,
@@ -320,8 +323,9 @@ func (r *ContainerdRuntime) ListSandboxes(ctx context.Context) ([]*SandboxMetada
 
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 
-	// 过滤出由 fast-sandbox 管理的容器
-	containers, err := r.client.Containers(ctx, "labels.\"fast-sandbox.io/managed\"==\"true\"")
+	// 过滤出由当前 Agent 管理的容器（通过 agent-id label 隔离）
+	filter := fmt.Sprintf("labels.\"fast-sandbox.io/managed\"==\"true\",labels.\"fast-sandbox.io/agent-id\"==\"%s\"", r.agentID)
+	containers, err := r.client.Containers(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}

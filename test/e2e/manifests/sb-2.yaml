@@ -1,9 +1,9 @@
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: test-sandbox-2
+  name: sb-2
   namespace: default
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
-  poolRef: default-pool
+  poolRef: autoscale-pool
