@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"fast-sandbox/internal/agent/infra"
+
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -26,6 +28,7 @@ type ContainerdRuntime struct {
 	netnsPath  string                      // Pod 的 network namespace 路径
 	agentID    string                      // Agent 名称 (Pod Name)
 	agentUID   string                      // Agent 唯一标识 (Pod UID)
+	infraMgr   *infra.Manager              // 基础设施插件管理
 }
 
 // Initialize 初始化 containerd 客户端
@@ -47,6 +50,13 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 	r.sandboxes = make(map[string]*SandboxMetadata)
 	r.agentID = os.Getenv("POD_NAME")
 	r.agentUID = os.Getenv("POD_UID")
+
+	// 初始化基础设施管理器
+	infraPodPath := os.Getenv("INFRA_DIR_IN_POD")
+	if infraPodPath == "" {
+		infraPodPath = "/opt/fast-sandbox/infra"
+	}
+	r.infraMgr = infra.NewManager(infraPodPath)
 
 	// 探测 Cgroup 路径 (仅用于日志和未来扩展)
 	if err := r.discoverCgroupPath(); err != nil {
@@ -169,10 +179,48 @@ func (r *ContainerdRuntime) prepareImage(ctx context.Context, imageName string) 
 }
 
 func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image containerd.Image) []oci.SpecOpts {
+	// 原始命令与参数
+	originalArgs := append(config.Command, config.Args...)
+	
+	// --- 插件注入逻辑 ---
+	var mounts []specs.Mount
+	finalArgs := originalArgs
+
+	if r.infraMgr != nil {
+		plugins := r.infraMgr.GetPlugins()
+		for _, p := range plugins {
+			hostPath := r.infraMgr.GetHostPath(p.BinName)
+			if hostPath == "" {
+				continue
+			}
+
+			// A. 添加挂载点
+			mounts = append(mounts, specs.Mount{
+				Source:      hostPath,
+				Destination: p.ContainerPath,
+				Type:        "bind",
+				Options:     []string{"ro", "rbind"}, // 只读绑定
+			})
+
+			// B. 命令包装 (如果是 Wrapper)
+			if p.IsWrapper {
+				// 包装逻辑: [plugin_path, --, original_cmd...]
+				// 注意：这里简单实现单包装器，多包装器需递归
+				wrapped := []string{p.ContainerPath, "--"}
+				finalArgs = append(wrapped, finalArgs...)
+			}
+		}
+	}
+
 	specOpts := []oci.SpecOpts{
 		oci.WithImageConfig(image),
-		oci.WithProcessArgs(append(config.Command, config.Args...)...),
+		oci.WithProcessArgs(finalArgs...),
 		oci.WithEnv(envMapToSlice(config.Env)),
+	}
+
+	// 应用挂载点
+	if len(mounts) > 0 {
+		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
 	if r.netnsPath != "" {

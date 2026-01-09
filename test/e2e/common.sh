@@ -16,6 +16,10 @@ function setup_env() {
     echo "=== [Setup] Building and Loading Images: $components ==="
     cd "$ROOT_DIR"
     
+    # 预拉取基础镜像以防 InitContainer 失败
+    docker pull alpine:latest
+    kind load docker-image alpine:latest --name "$CLUSTER_NAME"
+
     for comp in $components; do
         make "docker-$comp"
         kind load docker-image "fast-sandbox/$comp:dev" --name "$CLUSTER_NAME"

@@ -168,12 +168,14 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 				Value: string(getRuntimeType(pool)),
 			},
 			corev1.EnvVar{Name: "RUNTIME_SOCKET", Value: "/run/containerd/containerd.sock"},
+			corev1.EnvVar{Name: "INFRA_DIR_IN_POD", Value: "/opt/fast-sandbox/infra"},
 		)
 
 		c.VolumeMounts = append(c.VolumeMounts,
 			corev1.VolumeMount{Name: "containerd-run", MountPath: "/run/containerd"},
 			corev1.VolumeMount{Name: "containerd-root", MountPath: "/var/lib/containerd"},
 			corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"},
+			corev1.VolumeMount{Name: "infra-tools", MountPath: "/opt/fast-sandbox/infra"},
 		)
 
 		if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
@@ -183,6 +185,17 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			})
 		}
 	}
+
+	podSpec.InitContainers = append(podSpec.InitContainers, corev1.Container{
+		Name:            "infra-init",
+		Image:           "alpine:latest",
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		// 使用 heredoc 确保脚本格式完美
+		Command: []string{"sh", "-c", "cat <<'EOF' > /opt/fast-sandbox/infra/fs-helper\n#!/bin/sh\necho [FS-INFRA] Helper Initiated\nexec \"$@\"\nEOF\nchmod +x /opt/fast-sandbox/infra/fs-helper"},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "infra-tools", MountPath: "/opt/fast-sandbox/infra"},
+		},
+	})
 
 	hostPathDirectory := corev1.HostPathDirectory
 	hostPathFile := corev1.HostPathCharDev
@@ -199,6 +212,12 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 		corev1.Volume{
 			Name:         "tmp",
 			VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/tmp", Type: &hostPathDirectory}},
+		},
+		corev1.Volume{
+			Name: "infra-tools",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
 		},
 	)
 
