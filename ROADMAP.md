@@ -39,12 +39,13 @@
     *   自动回收那些对应的 Agent Pod 已不存在的孤儿容器、Task 和 Snapshot。
     *   清理 `/run/containerd/fifo` 目录下的陈旧管道文件。
 
-### 1.4 状态自愈与心跳摘除 (Self-healing)
-*   **目标**: 快速感知节点故障并重调度。
-*   **任务**:
-    *   在 `Registry` 中增加存活检查（TTLs）。
-    *   如果 Agent 超过 N 秒无心跳，Controller 自动将其标记为 `Offline`。
-    *   自动重置 `Offline` 节点上的 Sandbox 状态为 `Pending` 触发重调度。
+### 1.4 状态自愈与受控恢复 (Self-healing & Controlled Recovery)
+*   **目标**: 提供策略化的故障感知与重置能力，兼顾幂等性与可用性。
+*   **方案**:
+    *   **失效策略**: 引入 `failurePolicy` (Manual/AutoRecreate)，由用户决定失联后的动作。
+    *   **失联观察期**: 只有在失联超过 `recoveryTimeoutSeconds` 后才触发自动动作，过滤网络抖动。
+    *   **一等公民重置**: 在 Spec 中增加 `resetRevision` 字段。用户通过更新时间戳，即可触发沙箱的逻辑驱逐与重调度。
+    *   **状态可见性**: 通过 `Conditions` 实时上报 Agent 连通性风险。
 
 ### 1.5 基础设施注入 (Infrastructure Injection)
 *   **目标**: 在 Sandbox 内静默运行系统级辅助进程（用于监控、指令下发等）。
@@ -95,6 +96,12 @@
 *   **方案**:
     *   开发 `kubectl-fs logs <sandbox-id>`：通过 Agent 流式回传容器日志。
     *   开发 `kubectl-fs exec <sandbox-id>`：建立经过 Agent 中转的 TTY 通道。
+
+### 2.6 可靠性，controller 的故障恢复，高可用 // 待定
+*   **目标**: controller 从故障中恢复时应该无损，保证内存中的registry 正确恢复。
+*   **方案**:
+    *   多分片副本，pool controller 是独立的，但是sandbox controller(api)可能分为多个, 同时对外服务
+    *   验证重启过程中，正确恢复数据
 
 ---
 

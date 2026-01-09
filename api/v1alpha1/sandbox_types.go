@@ -14,6 +14,16 @@ var (
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
+// FailurePolicy defines the action to take when the agent becomes unreachable.
+type FailurePolicy string
+
+const (
+	// FailurePolicyManual means only report the failure in status, do nothing automatically.
+	FailurePolicyManual FailurePolicy = "Manual"
+	// FailurePolicyAutoRecreate means automatically reschedule the sandbox after timeout.
+	FailurePolicyAutoRecreate FailurePolicy = "AutoRecreate"
+)
+
 // SandboxSpec defines the desired state of Sandbox.
 type SandboxSpec struct {
 	Image      string          `json:"image"`
@@ -30,6 +40,20 @@ type SandboxSpec struct {
 	// The controller ensures no port conflicts on the same Agent Pod during scheduling.
 	ExposedPorts []int32 `json:"exposedPorts,omitempty"`
 
+	// FailurePolicy defines the recovery strategy when the agent is lost.
+	// Defaults to "Manual".
+	// +kubebuilder:default="Manual"
+	FailurePolicy FailurePolicy `json:"failurePolicy,omitempty"`
+
+	// RecoveryTimeoutSeconds is the duration to wait before taking action after losing contact with agent.
+	// Defaults to 60 seconds.
+	// +kubebuilder:default=60
+	RecoveryTimeoutSeconds int32 `json:"recoveryTimeoutSeconds,omitempty"`
+
+	// ResetRevision is an opaque token (usually a timestamp) used to trigger a manual reset.
+	// When Spec.ResetRevision > Status.AcceptedResetRevision, the sandbox will be rescheduled.
+	ResetRevision *metav1.Time `json:"resetRevision,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// PoolRef specifies which SandboxPool this sandbox should be scheduled to.
 	// This field is required.
@@ -44,6 +68,9 @@ type SandboxStatus struct {
 	SandboxID   string             `json:"sandboxID,omitempty"`
 	Endpoints   []string           `json:"endpoints,omitempty"`
 	Conditions  []metav1.Condition `json:"conditions,omitempty"`
+
+	// AcceptedResetRevision reflects the latest reset revision that was processed by the controller.
+	AcceptedResetRevision *metav1.Time `json:"acceptedResetRevision,omitempty"`
 }
 
 // +kubebuilder:object:root=true
