@@ -146,12 +146,30 @@ func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbo
 		return nil
 	}
 
+	updated := false
 	if status, ok := agentInfo.SandboxStatuses[sandbox.Name]; ok {
 		if sandbox.Status.Phase != status.Phase || sandbox.Status.SandboxID != status.SandboxID {
 			sandbox.Status.Phase = status.Phase
 			sandbox.Status.SandboxID = status.SandboxID
-			return r.Status().Update(ctx, sandbox)
+			updated = true
 		}
+	}
+
+	// 填充 Endpoints: PodIP + ExposedPorts
+	if len(sandbox.Spec.ExposedPorts) > 0 && agentInfo.PodIP != "" {
+		var newEndpoints []string
+		for _, port := range sandbox.Spec.ExposedPorts {
+			newEndpoints = append(newEndpoints, fmt.Sprintf("%s:%d", agentInfo.PodIP, port))
+		}
+		// 简单比较并更新
+		if len(sandbox.Status.Endpoints) != len(newEndpoints) {
+			sandbox.Status.Endpoints = newEndpoints
+			updated = true
+		}
+	}
+
+	if updated {
+		return r.Status().Update(ctx, sandbox)
 	}
 	return nil
 }
@@ -162,29 +180,53 @@ func (r *SandboxReconciler) schedule(sandbox apiv1alpha1.Sandbox) (*agentpool.Ag
 		return nil, fmt.Errorf("no agents available")
 	}
 
-	// 1. 实时统计已占用的插槽 (Bypass Registry Memory)
+	// 1. 实时统计：已占用插槽和已占用端口
 	var allSandboxes apiv1alpha1.SandboxList
 	if err := r.List(context.Background(), &allSandboxes); err != nil {
 		return nil, err
 	}
-	usedMap := make(map[string]int)
+	
+	usedSlots := make(map[string]int)
+	usedPorts := make(map[string]map[int32]bool) // PodName -> Set[Port]
+
 	for _, sb := range allSandboxes.Items {
 		if sb.Status.AssignedPod != "" && sb.Name != sandbox.Name {
-			usedMap[sb.Status.AssignedPod]++
+			usedSlots[sb.Status.AssignedPod]++
+			
+			// 记录端口占用
+			if usedPorts[sb.Status.AssignedPod] == nil {
+				usedPorts[sb.Status.AssignedPod] = make(map[int32]bool)
+			}
+			for _, p := range sb.Spec.ExposedPorts {
+				usedPorts[sb.Status.AssignedPod][p] = true
+			}
 		}
 	}
 
 	// 2. 过滤与打分
 	var candidates []agentpool.AgentInfo
 	for _, a := range agents {
-		// Pool 匹配（poolRef 必填，必须精确匹配）
+		// Pool 匹配
 		if a.PoolName != sandbox.Spec.PoolRef {
 			continue
 		}
 
-		// 容量检查 (基于实时统计)
-		allocated := usedMap[a.PodName]
+		// A. 容量检查
+		allocated := usedSlots[a.PodName]
 		if allocated >= a.Capacity {
+			continue
+		}
+
+		// B. 端口互斥检查
+		hasConflict := false
+		occupied := usedPorts[a.PodName]
+		for _, p := range sandbox.Spec.ExposedPorts {
+			if occupied[p] {
+				hasConflict = true
+				break
+			}
+		}
+		if hasConflict {
 			continue
 		}
 		

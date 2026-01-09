@@ -26,6 +26,7 @@ spec:
               args: {type: array, items: {type: string}}
               poolRef: {type: string}
               expireTime: {type: string, format: date-time}
+              exposedPorts: {type: array, items: {type: integer}}
           status:
             type: object
             properties:
@@ -33,5 +34,6 @@ spec:
               assignedPod: {type: string}
               nodeName: {type: string}
               sandboxID: {type: string}
+              endpoints: {type: array, items: {type: string}}
     subresources:
       status: {}

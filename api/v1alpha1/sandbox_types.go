@@ -26,6 +26,10 @@ type SandboxSpec struct {
 	// If not set, the sandbox will not expire automatically.
 	ExpireTime *metav1.Time `json:"expireTime,omitempty"`
 
+	// ExposedPorts specifies the ports that the sandbox application will listen on.
+	// The controller ensures no port conflicts on the same Agent Pod during scheduling.
+	ExposedPorts []int32 `json:"exposedPorts,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// PoolRef specifies which SandboxPool this sandbox should be scheduled to.
 	// This field is required.
@@ -38,7 +42,7 @@ type SandboxStatus struct {
 	AssignedPod string             `json:"assignedPod,omitempty"`
 	NodeName    string             `json:"nodeName,omitempty"`
 	SandboxID   string             `json:"sandboxID,omitempty"`
-	Endpoint    string             `json:"endpoint,omitempty"`
+	Endpoints   []string           `json:"endpoints,omitempty"`
 	Conditions  []metav1.Condition `json:"conditions,omitempty"`
 }
 

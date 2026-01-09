@@ -24,11 +24,13 @@
     *   在创建 Sandbox 子 Cgroup 后，自动计算并写入 `cpu.max` / `memory.max` (Cgroup v2)。
     *   实现基于 Slot 权重的 CPU 分配逻辑。
 
-### 1.2 端口管理与访问方案 (Network Port Management)
-*   **目标**: 解决多 Sandbox 共享 Pod IP 导致的端口冲突。
-*   **任务**:
-    *   **动态端口池**: Agent 维护本地可用端口池，在创建 Sandbox 时通过环境变量 `SANDBOX_PORT` 动态分配。
-    *   **内置反向代理**: Agent Pod 内部运行轻量级代理，根据请求头（如 `X-Sandbox-ID`）将流量转发至对应容器。
+### 1.2 端口管理与互斥调度 (Port Management & Scheduling Exclusion)
+*   **目标**: 解决多 Sandbox 共享 Pod IP 导致的端口冲突，同时保持访问直观性。
+*   **方案**:
+    *   **端口声明**: 用户在 `SandboxSpec` 中声明需要监听的固定端口列表（如 `[8080, 9090]`）。
+    *   **调度互斥**: `SandboxController` 在调度阶段增加端口校验逻辑。若目标 Agent Pod 上已有其他 Sandbox 占用了声明中的任一端口，则跳过该 Agent。
+    *   **状态回填**: 将 `PodIP:<Port>` 直接回填至 `Sandbox.Status.Endpoints`，用户可直接通过原端口访问。
+    *   **优势**: 实现简单，用户无需通过环境变量动态获取端口，应用体验与普通容器一致。
 
 ### 1.3 宿主机“清道夫” (Node Janitor DaemonSet)
 *   **目标**: 清理 Agent 意外崩溃留下的孤儿资源。
