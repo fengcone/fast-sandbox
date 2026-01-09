@@ -1,71 +1,74 @@
-# Node Janitor 设计方案
+# Node Janitor 设计方案 (完整版)
 
-## 1. 背景
-在 `Fast Sandbox` 系统中，Agent Pod 负责直接管理宿主机上的 OCI 容器。当 Agent Pod 意外崩溃（如 OOMKilled）或所在节点发生故障导致 Pod 被 K8s 控制面移除时，其在宿主机上创建的 Sandbox 容器将变成“孤儿”。这些孤儿资源会造成：
-1. 内存与 CPU 资源被非法占用。
-2. 调度 Slot 统计不准。
-3. 宿主机磁盘空间（Snapshots）和文件描述符（FIFOs）泄露。
+## 1. 背景与动机
+在 `Fast Sandbox` 系统中，Agent Pod 负责直接管理宿主机上的 OCI 容器。由于这些容器是绕过 K8s 原生 Pod 管理的，当发生以下异常时，会产生“孤儿资源”：
+1. **Agent 崩溃 (Pod-level Orphan)**: Agent Pod 意外消失（如 OOM/宿主机宕机），但其创建的微容器仍在运行。
+2. **控制面失步 (CRD-level Orphan)**: Agent 已启动容器，但对应的 `Sandbox` CRD 由于网络或控制器故障未能创建或被误删（常见于 Fast-Path API 的异步场景）。
+
+孤儿资源会导致 CPU/内存占用泄露、调度 Slot 统计失效以及宿主机磁盘空间溢出。
 
 ## 2. 核心逻辑
 
 ### 2.1 强一致性标签 (Labels)
-Agent 在创建容器时必须注入以下标签作为“所有权证明”：
-- `fast-sandbox.io/agent-name`: 标识所属 Agent Pod 名称。
-- `fast-sandbox.io/agent-uid`: 标识所属 Agent Pod 的唯一 UID。
-- `fast-sandbox.io/managed`: 设为 `true`，标识由本项目管理。
+Agent 在创建容器时必须注入以下标签，作为 Janitor 判定的唯一事实依据：
+- `fast-sandbox.io/agent-uid`: 所属 Agent Pod 的唯一 UID。
+- `fast-sandbox.io/sandbox-name`: 对应的 Sandbox CRD 逻辑名称。
+- `fast-sandbox.io/managed`: 设为 `true`，标识此资源受 Janitor 监管。
 
-### 2.2 资源回收策略
-Janitor 采用 **Informer 事件监听** 与 **周期性轮询扫描** 相结合的策略。
+### 2.2 资源回收策略 (双重对账)
+Janitor 采用 **Informer 事件监听** 与 **深度对账扫描** 相结合的策略。
 
-#### A. 事件监听 (Informer)
+#### A. Pod 监听模式 (快速响应)
 - 监听本节点（`spec.nodeName`）的 Pod 删除事件。
-- 一旦监听到 `agent-uid` 对应的 Pod 彻底从集群消失，立即将该 UID 关联的所有 Sandbox ID 放入清理队列。
+- 一旦监听到某个 `agent-uid` 对应的 Pod 彻底消失，立即将该 UID 关联的所有物理容器放入清理队列。
 
-#### B. 周期扫描 (Periodic Scanner)
-- 默认每 120 秒扫描一次本地 Containerd 容器。
-- 对比 K8s API (via PodLister)，如果容器关联的 `agent-uid` 在 K8s 中不存在，则标记为孤儿。
-- **防止误删**: 仅处理创建时间超过 2 分钟的容器，避免与正在进行的调度流程冲突。
+#### B. 逻辑对账模式 (最终闭环)
+- **周期**: 默认每 60 秒执行一次全量物理扫描。
+- **保护窗口**: 仅处理创建时间超过 60 秒的容器，为 Fast-Path 的异步写入留出时间。
+- **判定准则**: 
+  - 扫描所有 `managed=true` 的容器。
+  - 通过 K8s Lister 检查容器对应的 `Sandbox` CRD。
+  - **如果 CRD 不存在（且已过保护期），则判定为孤儿，强制物理回收。**
 
-### 2.3 清理流程
+### 2.3 判定矩阵 (Decision Matrix)
+
+| 物理容器状态 | Agent Pod 状态 | Sandbox CRD 状态 | Janitor 动作 | 场景说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| Running | 存活 | 存在 | 保持现状 | 正常业务运行 |
+| Running | **消失** | 存在/不存在 | **立即清理** | Agent 进程或 Pod 意外挂掉 |
+| Running | 存活 | **不存在** | **过期清理** | Fast-Path 异步对账失败（逻辑丢失） |
+| Running | 存活 | 存在但 UID 错配 | **立即清理** | 旧沙箱被重置后残留的物理脏数据 |
+
+## 3. 清理流程 (Cleanup Flow)
 1. **停止任务**: 发送 `SIGKILL` 并删除 Containerd Task。
 2. **销毁容器**: 删除 Containerd 容器元数据。
-3. **空间回收**: 清理对应的快照 (Snapshots)。
-4. **清理遗留文件**:
+3. **资源回收**:
+   - 清理对应的快照 (Snapshots)。
    - 清理 `/run/containerd/fifo/` 目录下相关的命名管道。
-   - (未来支持) 扫描并卸载 `/var/lib/kubelet/pods/<uid>` 相关的残留挂载点。
+   - (未来支持) 扫描并卸载宿主机上的挂载残留。
 
-## 3. 组件架构与部署
+## 4. 组件架构与部署
 
-### 3.1 独立组件声明
-`Node Janitor` 是一个全新的独立二进制应用，与 `Agent` 和 `Controller` 并列。
-- **Agent**: 运行在 SandboxPool 管理的 Pod 中，负责按需创建沙箱。
-- **Janitor**: 以 **DaemonSet** 模式运行在宿主机节点（Node）上，拥有宿主机文件系统和 Containerd Socket 的特权访问权限，负责“扫尾”。
+### 4.1 独立组件形态
+`Node Janitor` 是一个独立的 Go 应用，以 **DaemonSet** 模式部署在所有工作节点上。
+- **权限需求**: `privileged: true`。
+- **核心挂载**: 
+  - `/run/containerd/containerd.sock` (控制运行时)。
+  - `/run/containerd/fifo/` (清理管道)。
+  - `/proc` (访问宿主机命名空间)。
 
-### 3.2 目录结构
+### 4.2 目录结构
 ```text
 .
-├── cmd/
-│   └── janitor/            # 应用程序入口
-│       └── main.go         # 初始化配置、启动循环
-├── internal/
-│   └── janitor/            # 核心业务逻辑
-│       ├── controller.go   # 基于 Informer 的事件处理
-│       ├── scanner.go      # 周期性扫描逻辑
-│       └── cleanup.go      # 具体执行 Containerd/FIFO 清理的方法
-└── test/e2e/core/manifests/
-    └── janitor-deploy.yaml # DaemonSet 部署清单
+├── cmd/janitor/            # 程序入口
+├── internal/janitor/
+│   ├── controller.go       # Pod Informer 监听逻辑
+│   ├── scanner.go          # 定期 CRD 对账逻辑 (核心)
+│   ├── cleanup.go          # Containerd 物理清理工具
+│   └── types.go            # 配置与状态定义
 ```
 
-### 3.3 部署形态
-- **容器镜像**: `fast-sandbox/janitor:dev`
-- **权限需求**: 
-  - `privileged: true` (用于 Unmount)。
-  - `hostPath` 挂载 `/run/containerd/containerd.sock`。
-  - `hostPath` 挂载 `/run/containerd/fifo/`。
-  - `hostPath` 挂载 `/proc`。
-
-## 4. 实现路线
-1. **Phase 1**: 更新 Agent 逻辑，注入 `agent-uid` 标签（`internal/agent/runtime`）。
-2. **Phase 2**: 创建 `cmd/janitor` 入口，集成 Containerd 与 K8s Client。
-3. **Phase 3**: 实现基于 Workqueue 的多线程清理逻辑。
-4. **Phase 4**: 编写 DaemonSet 部署清单并进行 E2E 故障模拟测试。
+## 5. 实施路线
+1. **Phase 1**: 更新 Agent 注入 `sandbox-name` 标签。
+2. **Phase 2**: 增强 `internal/janitor/scanner.go`，引入 Sandbox Lister 和对账判定算法。
+3. **Phase 4**: 编写 E2E 测试用例 `node-janitor-recovery` 进行故障模拟验证。

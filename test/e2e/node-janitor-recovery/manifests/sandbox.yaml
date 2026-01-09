@@ -1,4 +1,7 @@
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
-metadata: { name: target-orphan }
-spec: { image: "docker.io/library/alpine:latest", command: ["/bin/sleep", "3600"], poolRef: janitor-test-pool }
+metadata: { name: sb-to-be-orphaned }
+spec:
+  image: docker.io/library/alpine:latest
+  command: ["/bin/sleep", "3600"]
+  poolRef: janitor-test-pool

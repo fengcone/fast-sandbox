@@ -8,16 +8,20 @@ import (
 	"syscall"
 
 	"fast-sandbox/internal/janitor"
+	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 func main() {
+    // ... (保持 flag 定义不变)
 	var kubeconfig string
 	var nodeName string
 	var ctrdSocket string
@@ -54,6 +58,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 初始化通用客户端以支持 CRD
+	scheme := runtime.NewScheme()
+	apiv1alpha1.AddToScheme(scheme)
+	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.Error(err, "Failed to create generic k8s client")
+		os.Exit(1)
+	}
+
 	// 2. 初始化 Containerd 客户端
 	ctrdClient, err := containerd.New(ctrdSocket)
 	if err != nil {
@@ -67,6 +80,7 @@ func main() {
 	defer stop()
 
 	j := janitor.NewJanitor(clientset, ctrdClient, nodeName)
+	j.K8sClient = k8sClient // 注入通用客户端
 	if err := j.Run(ctx); err != nil {
 		logger.Error(err, "Janitor exited with error")
 		os.Exit(1)

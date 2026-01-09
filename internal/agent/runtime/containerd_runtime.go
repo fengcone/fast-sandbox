@@ -280,12 +280,12 @@ func parseMemoryToBytes(s string) int64 {
 
 func (r *ContainerdRuntime) prepareLabels(config *SandboxConfig) map[string]string {
 	return map[string]string{
-		"fast-sandbox.io/managed":    "true",
-		"fast-sandbox.io/agent-name": r.agentID,
-		"fast-sandbox.io/agent-uid":  r.agentUID,
-		"fast-sandbox.io/id":         config.SandboxID,
-		"fast-sandbox.io/claim-uid":  config.ClaimUID,
-		"fast-sandbox.io/claim-nm":   config.ClaimName,
+		"fast-sandbox.io/managed":      "true",
+		"fast-sandbox.io/agent-name":   r.agentID,
+		"fast-sandbox.io/agent-uid":    r.agentUID,
+		"fast-sandbox.io/id":           config.SandboxID,
+		"fast-sandbox.io/claim-uid":    config.ClaimUID,
+		"fast-sandbox.io/sandbox-name": config.ClaimName, // 规范化标签名
 	}
 }
 
