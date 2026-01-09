@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package fastpath.v1;
+
+option go_package = "fast-sandbox/api/v1;fastpathv1";
+
+service FastPathService {
+  // CreateSandbox 极速创建沙箱，绕过 K8s 控制面延迟
+  rpc CreateSandbox(CreateRequest) returns (CreateResponse);
+  
+  // DeleteSandbox 极速删除沙箱
+  rpc DeleteSandbox(DeleteRequest) returns (DeleteResponse);
+}
+
+message CreateRequest {
+  string image = 1;
+  string pool_ref = 2;
+  repeated int32 exposed_ports = 3;
+  repeated string command = 4;
+  repeated string args = 5;
+}
+
+message CreateResponse {
+  string sandbox_id = 1;
+  string agent_pod = 2;
+  repeated string endpoints = 3; // IP:Port 列表
+}
+
+message DeleteRequest {
+  string sandbox_id = 1;
+}
+
+message DeleteResponse {
+  bool success = 1;
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net"
 	"os"
 
 	"fast-sandbox/internal/api"
@@ -16,9 +17,12 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
+	fastpathv1 "fast-sandbox/api/proto/v1"
 	"fast-sandbox/internal/controller"
 	"fast-sandbox/internal/controller/agentcontrol"
 	"fast-sandbox/internal/controller/agentpool"
+	"fast-sandbox/internal/controller/fastpath"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -81,6 +85,25 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 	loop := agentcontrol.NewLoop(mgr.GetClient(), reg, agentHTTPClient)
 	go loop.Start(ctx)
+
+	// --- 1. 启动 Fast-Path gRPC Server ---
+	lis, err := net.Listen("tcp", ":9090")
+	if err != nil {
+		setupLog.Error(err, "failed to listen on port 9090 for fast-path")
+		os.Exit(1)
+	}
+	grpcServer := grpc.NewServer()
+	fastpathv1.RegisterFastPathServiceServer(grpcServer, &fastpath.Server{
+		K8sClient:   mgr.GetClient(),
+		Registry:    reg,
+		AgentClient: agentHTTPClient,
+	})
+	setupLog.Info("Starting Fast-Path gRPC server", "port", 9090)
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			setupLog.Error(err, "failed to serve gRPC")
+		}
+	}()
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
