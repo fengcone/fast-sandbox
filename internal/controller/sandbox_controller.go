@@ -36,13 +36,21 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 0. 手动重置逻辑 (ResetRevision)
-	if sandbox.Spec.ResetRevision != nil {
-		if sandbox.Status.AcceptedResetRevision == nil || sandbox.Spec.ResetRevision.After(sandbox.Status.AcceptedResetRevision.Time) {
-			logger.Info("Manual reset requested, evicting sandbox", "revision", sandbox.Spec.ResetRevision)
+	// --- 0. 重置逻辑 (ResetRevision) ---
+	if sandbox.Spec.ResetRevision != nil && !sandbox.Spec.ResetRevision.IsZero() {
+		shouldReset := false
+		if sandbox.Status.AcceptedResetRevision == nil || sandbox.Status.AcceptedResetRevision.IsZero() {
+			shouldReset = true
+		} else if sandbox.Spec.ResetRevision.Time.Truncate(time.Second).After(sandbox.Status.AcceptedResetRevision.Time.Truncate(time.Second)) {
+			shouldReset = true
+		}
+
+		if shouldReset {
+			logger.Info("Manual reset triggered", "specRevision", sandbox.Spec.ResetRevision, "statusRevision", sandbox.Status.AcceptedResetRevision)
 			sandbox.Status.AssignedPod = ""
 			sandbox.Status.NodeName = ""
 			sandbox.Status.Phase = "Pending"
+			sandbox.Status.SandboxID = ""
 			sandbox.Status.AcceptedResetRevision = sandbox.Spec.ResetRevision
 			if err := r.Status().Update(ctx, &sandbox); err != nil {
 				return ctrl.Result{}, err
@@ -51,11 +59,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// 0.1 自动过期清理逻辑 (ExpireTime GC)
+	// --- 0.1 过期清理 (ExpireTime GC) ---
 	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
-		now := time.Now().UTC()
-		expireAt := sandbox.Spec.ExpireTime.UTC()
-		if now.After(expireAt) || now.Equal(expireAt) {
+		if time.Now().UTC().After(sandbox.Spec.ExpireTime.UTC()) {
 			logger.Info("Sandbox expired, deleting", "name", sandbox.Name)
 			if err := r.Delete(ctx, &sandbox); err != nil {
 				return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -64,10 +70,10 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// 1. 调度逻辑
+	// --- 1. 调度逻辑 ---
 	if sandbox.Status.AssignedPod == "" {
 		if sandbox.Spec.PoolRef == "" {
-			logger.Error(nil, "poolRef is required but empty")
+			logger.Error(nil, "poolRef is required")
 			sandbox.Status.Phase = "Failed"
 			r.Status().Update(ctx, &sandbox)
 			return ctrl.Result{}, nil
@@ -78,7 +84,7 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// 1.1 健康检查与自愈逻辑
+	// --- 1.1 健康检查与自愈逻辑 ---
 	if sandbox.Status.AssignedPod != "" {
 		agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
 		if !ok {
@@ -107,7 +113,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if r.updateCondition(&sandbox, newCond) {
-			r.Status().Update(ctx, &sandbox)
+			if err := r.Status().Update(ctx, &sandbox); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 
 		// 检查自动恢复策略
@@ -280,12 +288,10 @@ func (r *SandboxReconciler) updateCondition(sandbox *apiv1alpha1.Sandbox, newCon
 }
 
 func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1alpha1.Sandbox{}, "status.assignedPod", func(rawObj client.Object) []string {
+	mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1alpha1.Sandbox{}, "status.assignedPod", func(rawObj client.Object) []string {
 		sb := rawObj.(*apiv1alpha1.Sandbox)
 		if sb.Status.AssignedPod == "" { return nil }
 		return []string{sb.Status.AssignedPod}
-	}); err != nil {
-		return err
-	}
+	})
 	return ctrl.NewControllerManagedBy(mgr).For(&apiv1alpha1.Sandbox{}).Complete(r)
 }

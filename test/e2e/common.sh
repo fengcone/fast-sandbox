@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # --- 通用路径定义 ---
-# 注意：假设从 test/e2e/<case>/test.sh 调用，脚本所在目录是 $SCRIPT_DIR
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$COMMON_DIR/../../" && pwd)"
 
@@ -31,8 +30,28 @@ function install_infra() {
     echo "=== [Setup] Installing Infrastructure (CRDs, RBAC, Controller) ==="
     cd "$ROOT_DIR"
     
-    # 始终使用 config/ 下的唯一真理
+    # 1. 安装 CRD 并等待其在 API Server 层面完全就绪
     kubectl apply -f config/crd/
+    kubectl wait --for=condition=Established crd/sandboxes.sandbox.fast.io --timeout=30s
+    kubectl wait --for=condition=Established crd/sandboxpools.sandbox.fast.io --timeout=30s
+
+    # 强制静默 5 秒，给 API Server 刷新 Discovery 缓存的时间
+    echo "Waiting for OpenAPI schema synchronization..."
+    sleep 5
+
+    local count=0
+    while ! kubectl get crd sandboxes.sandbox.fast.io -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties}' | grep -q "resetRevision"; do
+        if [ $count -gt 20 ]; then
+            echo "❌ Timeout waiting for CRD schema sync"
+            exit 1
+        fi
+        echo "Still waiting for resetRevision field to appear..."
+        sleep 2
+        count=$((count+1))
+    done
+    echo "Schema synced successfully."
+
+    # 2. 安装 RBAC 和 Controller
     kubectl apply -f config/rbac/base.yaml
     kubectl apply -f config/manager/controller.yaml
     
@@ -42,7 +61,6 @@ function install_infra() {
 # --- 3. 部署 Janitor (可选) ---
 function install_janitor() {
     echo "=== [Setup] Installing Node Janitor ==="
-    # 临时从 common 目录或 manifests 生成
     cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: DaemonSet
@@ -93,6 +111,5 @@ function cleanup_all() {
     kubectl delete clusterrolebinding fast-sandbox-manager-rolebinding --ignore-not-found=true || true
     kubectl delete clusterrole fast-sandbox-manager-role --ignore-not-found=true || true
     kubectl delete serviceaccount fast-sandbox-manager-role --ignore-not-found=true || true
-    # 注意：根据原则，这里可以选择是否删除 CRD。为了彻底独立，我们选择删除。
     kubectl delete -f config/crd/ --ignore-not-found=true || true
 }
