@@ -11,7 +11,7 @@ JANITOR_IMAGE="fast-sandbox/janitor:dev"
 
 # --- 1. 环境初始化 (构建与导入) ---
 function setup_env() {
-    local components=$1 # e.g. "controller agent"
+    local components=$1 # e.g. "controller agent janitor"
     echo "=== [Setup] Building and Loading Images: $components ==="
     cd "$ROOT_DIR"
     
@@ -58,23 +58,31 @@ function install_infra() {
     kubectl rollout status deployment/fast-sandbox-controller --timeout=60s
 }
 
-# --- 3. 部署 Janitor (可选) ---
+# --- 3. 部署 Janitor (强制刷新) ---
 function install_janitor() {
-    echo "=== [Setup] Installing Node Janitor ==="
+    echo "=== [Setup] Refreshing Node Janitor ==="
+    
+    # 先删除可能存在的旧实例（无论名字是 janitor-e2e 还是 fast-sandbox-janitor）
+    kubectl delete ds -l app=fast-sandbox-janitor --ignore-not-found=true --force --grace-period=0
+    kubectl delete ds janitor-e2e --ignore-not-found=true --force --grace-period=0
+
     cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: DaemonSet
-metadata: { name: janitor-e2e }
+metadata: 
+  name: fast-sandbox-janitor-e2e
+  labels: { app: fast-sandbox-janitor }
 spec:
-  selector: { matchLabels: { app: janitor-e2e } }
+  selector: { matchLabels: { app: fast-sandbox-janitor-e2e } }
   template:
-    metadata: { labels: { app: janitor-e2e } }
+    metadata: { labels: { app: fast-sandbox-janitor-e2e } }
     spec:
       serviceAccountName: fast-sandbox-manager-role
       tolerations: [{ operator: Exists }]
       containers:
       - name: janitor
         image: $JANITOR_IMAGE
+        imagePullPolicy: IfNotPresent
         securityContext: { privileged: true }
         env: [{ name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }]
         volumeMounts:
@@ -84,7 +92,7 @@ spec:
       - { name: sock, hostPath: { path: /run/containerd/containerd.sock, type: Socket } }
       - { name: fifo, hostPath: { path: /run/containerd/fifo, type: Directory } }
 EOF
-    kubectl rollout status daemonset/janitor-e2e --timeout=60s
+    kubectl rollout status daemonset/fast-sandbox-janitor-e2e --timeout=60s
 }
 
 # --- 4. 辅助工具：等待 Pod Ready ---
@@ -107,7 +115,11 @@ function cleanup_all() {
     kubectl delete sandboxpool --all --force --grace-period=0 --ignore-not-found=true || true
     kubectl delete sandbox --all --force --grace-period=0 --ignore-not-found=true || true
     kubectl delete deployment fast-sandbox-controller --ignore-not-found=true || true
-    kubectl delete ds janitor-e2e --ignore-not-found=true || true
+    
+    # 清理所有 Janitor 变体
+    kubectl delete ds fast-sandbox-janitor-e2e --ignore-not-found=true --force --grace-period=0 || true
+    kubectl delete ds janitor-e2e --ignore-not-found=true --force --grace-period=0 || true
+    
     kubectl delete clusterrolebinding fast-sandbox-manager-rolebinding --ignore-not-found=true || true
     kubectl delete clusterrole fast-sandbox-manager-role --ignore-not-found=true || true
     kubectl delete serviceaccount fast-sandbox-manager-role --ignore-not-found=true || true
