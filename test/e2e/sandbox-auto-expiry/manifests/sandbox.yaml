@@ -5,4 +5,4 @@ spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
   poolRef: expiry-pool
-  expireTime: "2026-01-08T11:30:18Z"
+  expireTime: "2026-01-09T07:33:42Z"

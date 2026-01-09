@@ -59,7 +59,6 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		return err
 	}
 
-	// Track seen agents to cleanup stale ones
 	seenAgents := make(map[agentpool.AgentID]bool)
 
 	for _, pod := range podList.Items {
@@ -78,7 +77,7 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 			continue
 		}
 
-		// 3. Update Registry
+		// 3. Update Registry (Keep existing Allocated count)
 		sbStatuses := make(map[string]api.SandboxStatus)
 		for _, s := range status.SandboxStatuses {
 			sbStatuses[s.SandboxID] = s
@@ -92,7 +91,6 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 			NodeName:        pod.Spec.NodeName,
 			PoolName:        pod.Labels["fast-sandbox.io/pool"],
 			Capacity:        status.Capacity,
-			Allocated:       status.Allocated,
 			Images:          status.Images,
 			SandboxStatuses: sbStatuses,
 			LastHeartbeat:   time.Now(),

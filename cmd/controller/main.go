@@ -92,6 +92,20 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
+	
+	// 崩溃恢复：在启动 Manager 之后，异步执行一次性状态恢复
+	go func() {
+		// 等待缓存同步
+		if mgr.GetCache().WaitForCacheSync(context.Background()) {
+			setupLog.Info("Cache synced, restoring registry state from cluster")
+			if err := reg.Restore(context.Background(), mgr.GetClient()); err != nil {
+				setupLog.Error(err, "failed to restore registry state")
+			} else {
+				setupLog.Info("Registry state restored successfully")
+			}
+		}
+	}()
+
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

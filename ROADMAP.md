@@ -65,12 +65,12 @@
 
 ## 2. 进阶功能 (Advanced Features) - 追求极致速度与智能化
 
-### 2.1 Fast-Path API (绕过 K8s 控制面延迟)
-*   **目标**: 实现 < 50ms 的极速调度响应。
+### 2.1 Fast-Path API 与水平扩展 (Fast-Path & Sharding)
+*   **目标**: 实现 < 50ms 的极速调度，并支持 Controller 的水平扩展。
 *   **方案**: 
-    *   Controller 暴露高性能 gRPC/HTTP 接口 `POST /v1/sandbox`。
-    *   **内存直调**: 调度器在内存中选定 Agent 并直接下发指令，不等待 K8s ETCD 写入。
-    *   **异步落盘**: 容器跑起来后再异步补齐 `Sandbox` CRD 记录。
+    *   **内存直调**: Controller 暴露高性能 gRPC/HTTP 接口，绕过 ETCD 直接与 Agent 通信。
+    *   **多副本分片**: 支持多副本部署以应对高并发，副本间通过分布式状态同步（如 K8s Lease 或外部缓存）确保调度一致性。
+    *   **异步持久化**: 优先满足启动速度，事后异步补齐 CRD 审计记录。
 
 ### 2.2 预测性镜像预热 (Predictive Image Pre-warming)
 *   **目标**: 消除冷启动中的镜像拉取时间。
@@ -97,11 +97,12 @@
     *   开发 `kubectl-fs logs <sandbox-id>`：通过 Agent 流式回传容器日志。
     *   开发 `kubectl-fs exec <sandbox-id>`：建立经过 Agent 中转的 TTY 通道。
 
-### 2.6 可靠性，controller 的故障恢复，高可用 // 待定
-*   **目标**: controller 从故障中恢复时应该无损，保证内存中的registry 正确恢复。
+### 2.6 状态恢复与自愈逻辑 (Controller Crash Recovery)
+*   **目标**: 确保 Controller 发生异常崩溃并重启后，系统能够无损恢复内存状态。
 *   **方案**:
-    *   多分片副本，pool controller 是独立的，但是sandbox controller(api)可能分为多个, 同时对外服务
-    *   验证重启过程中，正确恢复数据
+    *   **现状重建**: Controller 启动时执行一次全量 List 动作，扫描集群内所有的 Sandbox CRD 和 Agent Pods。
+    *   **注册表热启动**: 根据 CRD 里的调度分配信息（`assignedPod` 等）和端口声明，反向重建内存中的 `Registry` (Allocated 计数、端口占用表)。
+    *   **逻辑闭环**: 在状态恢复完成前，暂停 Fast-Path 的写操作，确保“冷启动”后的调度决策基于最准确的集群现状。
 
 ---
 
