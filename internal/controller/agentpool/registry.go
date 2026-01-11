@@ -98,6 +98,13 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// 端口范围验证 (有效端口范围: 1-65535)
+	for _, p := range sb.Spec.ExposedPorts {
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", p)
+		}
+	}
+
 	var bestID AgentID
 	var minScore = 1000000
 
@@ -105,6 +112,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		if a.PoolName != sb.Spec.PoolRef {
 			continue
 		}
+		// Capacity 为 0 表示无限制，Capacity > 0 时检查容量
 		if a.Capacity > 0 && a.Allocated >= a.Capacity {
 			continue
 		}
@@ -158,7 +166,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		agent.UsedPorts[p] = true
 	}
 	r.agents[bestID] = agent
-	
+
 	res := agent
 	return &res, nil
 }
@@ -167,15 +175,33 @@ func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if a, ok := r.agents[id]; ok {
-		if a.Allocated > 0 {
-			a.Allocated--
-		}
+	a, ok := r.agents[id]
+	if !ok {
+		// Agent 不存在，无需释放
+		return
+	}
+
+	// 验证 sandbox 是否真的分配给这个 agent
+	// 通过检查 SandboxStatuses 中是否有这个 sandbox 的记录
+	if _, exists := a.SandboxStatuses[sb.Name]; !exists && len(a.SandboxStatuses) > 0 {
+		// 如果 SandboxStatuses 不为空但没有这个 sandbox，说明它可能从未被分配到这里
+		// 为了安全起见，仍然执行端口清理（防止边缘情况），但不减少 Allocated 计数
 		for _, p := range sb.Spec.ExposedPorts {
 			delete(a.UsedPorts, p)
 		}
-		r.agents[id] = a
+		return
 	}
+
+	// 执行释放操作
+	if a.Allocated > 0 {
+		a.Allocated--
+	}
+	for _, p := range sb.Spec.ExposedPorts {
+		delete(a.UsedPorts, p)
+	}
+	// 清理 SandboxStatuses 记录
+	delete(a.SandboxStatuses, sb.Name)
+	r.agents[id] = a
 }
 
 func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {

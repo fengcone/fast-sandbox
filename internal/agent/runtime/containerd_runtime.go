@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,16 +21,24 @@ import (
 
 // ContainerdRuntime 实现基于 containerd 的容器运行时
 type ContainerdRuntime struct {
-	mu         sync.RWMutex
-	socketPath string
-	client     *containerd.Client
-	sandboxes  map[string]*SandboxMetadata // sandboxID -> metadata
-	cgroupPath string                      // Pod 的 cgroup 路径
-	netnsPath  string                      // Pod 的 network namespace 路径
-	agentID    string                      // Agent 名称 (Pod Name)
-	agentUID   string                      // Agent 唯一标识 (Pod UID)
-	infraMgr   *infra.Manager              // 基础设施插件管理
+	mu                sync.RWMutex
+	socketPath        string
+	client            *containerd.Client
+	sandboxes         map[string]*SandboxMetadata // sandboxID -> metadata
+	cgroupPath        string                      // Pod 的 cgroup 路径
+	netnsPath         string                      // Pod 的 network namespace 路径
+	agentID           string                      // Agent 名称 (Pod Name)
+	agentUID          string                      // Agent 唯一标识 (Pod UID)
+	infraMgr          *infra.Manager              // 基础设施插件管理
+	allowedPluginPaths []string                   // 允许的插件路径白名单
 }
+
+const (
+	// 默认操作超时时间
+	defaultOperationTimeout = 30 * time.Second
+	// 容器停止超时时间
+	containerStopTimeout = 10 * time.Second
+)
 
 // Initialize 初始化 containerd 客户端
 func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) error {
@@ -41,6 +50,10 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 		r.socketPath = "/run/containerd/containerd.sock"
 	}
 
+	// 添加超时保护
+	ctx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
+	defer cancel()
+
 	client, err := containerd.New(r.socketPath, containerd.WithDefaultNamespace("k8s.io"))
 	if err != nil {
 		return fmt.Errorf("failed to create containerd client: %w", err)
@@ -50,6 +63,19 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 	r.sandboxes = make(map[string]*SandboxMetadata)
 	r.agentID = os.Getenv("POD_NAME")
 	r.agentUID = os.Getenv("POD_UID")
+
+	// 配置允许的插件路径白名单
+	// 从环境变量读取，默认为 /opt/fast-sandbox/infra
+	allowedPaths := os.Getenv("ALLOWED_PLUGIN_PATHS")
+	if allowedPaths != "" {
+		r.allowedPluginPaths = strings.Split(allowedPaths, ":")
+	} else {
+		infraPodPath := os.Getenv("INFRA_DIR_IN_POD")
+		if infraPodPath == "" {
+			infraPodPath = "/opt/fast-sandbox/infra"
+		}
+		r.allowedPluginPaths = []string{infraPodPath}
+	}
 
 	// 初始化基础设施管理器
 	infraPodPath := os.Getenv("INFRA_DIR_IN_POD")
@@ -61,9 +87,10 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 	// 探测 Cgroup 路径 (仅用于日志和未来扩展)
 	if err := r.discoverCgroupPath(); err != nil {
 		fmt.Printf("Warning: failed to discover cgroup path: %v\n", err)
-		r.cgroupPath = "" 
+		r.cgroupPath = ""
 	}
 
+	// 探测 Agent Pod 的网络命名空间路径（用于共享给所有 Sandbox）
 	if err := r.discoverNetNSPath(ctx); err != nil {
 		fmt.Printf("Warning: failed to discover network namespace: %v\n", err)
 	}
@@ -124,6 +151,11 @@ func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
 func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxConfig) (*SandboxMetadata, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// 添加超时保护
+	ctx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
+	defer cancel()
+
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 
 	image, err := r.prepareImage(ctx, config.Image)
@@ -141,18 +173,22 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 		containerd.WithNewSpec(specOpts...),
 		containerd.WithContainerLabels(labels),
 	)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
 
 	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
 	if err != nil {
-		container.Delete(ctx, containerd.WithSnapshotCleanup)
-		return nil, err
+		// 清理容器和快照
+		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
+		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
 	if err := task.Start(ctx); err != nil {
-		task.Delete(ctx)
-		container.Delete(ctx, containerd.WithSnapshotCleanup)
-		return nil, err
+		// 清理 task 和容器
+		_, _ = task.Delete(ctx, containerd.WithProcessKill)
+		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
+		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
 	metadata := &SandboxMetadata{
@@ -181,8 +217,8 @@ func (r *ContainerdRuntime) prepareImage(ctx context.Context, imageName string) 
 func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image containerd.Image) []oci.SpecOpts {
 	// 原始命令与参数
 	originalArgs := append(config.Command, config.Args...)
-	
-	// --- 插件注入逻辑 ---
+
+	// --- 插件注入逻辑 (带路径验证) ---
 	var mounts []specs.Mount
 	finalArgs := originalArgs
 
@@ -194,12 +230,24 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image contain
 				continue
 			}
 
+			// 验证插件路径是否在允许的白名单内
+			if !r.isPluginPathAllowed(hostPath) {
+				fmt.Printf("SECURITY: Plugin path %s is not in allowed paths, skipping\n", hostPath)
+				continue
+			}
+
+			// 验证文件是否存在且可执行
+			if _, err := os.Stat(hostPath); err != nil {
+				fmt.Printf("Warning: Plugin binary %s not accessible: %v\n", hostPath, err)
+				continue
+			}
+
 			// A. 添加挂载点
 			mounts = append(mounts, specs.Mount{
 				Source:      hostPath,
 				Destination: p.ContainerPath,
 				Type:        "bind",
-				Options:     []string{"ro", "rbind"}, // 只读绑定
+				Options:     []string{"ro", "rbind", "nosuid", "nodev"}, // 只读绑定，添加安全选项
 			})
 
 			// B. 命令包装 (如果是 Wrapper)
@@ -223,6 +271,9 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image contain
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
+	// 网络命名空间配置：共享 Agent Pod 的网络命名空间
+	// 这是 Fast Sandbox 的默认行为，可以实现毫秒级启动
+	// 对于 gVisor 运行时，它有自己的用户态网络栈，但仍然共享主机网络接口
 	if r.netnsPath != "" {
 		specOpts = append(specOpts, oci.WithLinuxNamespace(specs.LinuxNamespace{
 			Type: specs.NetworkNamespace,
@@ -241,6 +292,25 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image contain
 	}
 
 	return specOpts
+}
+
+// isPluginPathAllowed 检查插件路径是否在允许的白名单内
+func (r *ContainerdRuntime) isPluginPathAllowed(pluginPath string) bool {
+	// 清理路径，解析符号链接
+	resolvedPath, err := filepath.EvalSymlinks(pluginPath)
+	if err != nil {
+		return false
+	}
+
+	for _, allowedPath := range r.allowedPluginPaths {
+		// 清理允许的路径
+		cleanAllowed := filepath.Clean(allowedPath)
+		// 检查插件路径是否以允许的路径为前缀
+		if strings.HasPrefix(resolvedPath, cleanAllowed+string(filepath.Separator)) || resolvedPath == cleanAllowed {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ContainerdRuntime) calculateSlotResources() (int64, int64, error) {

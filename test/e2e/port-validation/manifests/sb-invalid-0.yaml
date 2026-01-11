@@ -1,0 +1,8 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: Sandbox
+metadata: { name: sb-port-invalid-0 }
+spec:
+  image: docker.io/library/alpine:latest
+  command: ["/bin/sleep", "3600"]
+  poolRef: port-validation-pool
+  exposedPorts: [0]

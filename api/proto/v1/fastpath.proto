@@ -18,6 +18,7 @@ message CreateRequest {
   repeated int32 exposed_ports = 3;
   repeated string command = 4;
   repeated string args = 5;
+  string namespace = 6; // 可选，默认为 "default"
 }
 
 message CreateResponse {
@@ -28,6 +29,7 @@ message CreateResponse {
 
 message DeleteRequest {
   string sandbox_id = 1;
+  string namespace = 2; // 可选，默认为 "default"
 }
 
 message DeleteResponse {

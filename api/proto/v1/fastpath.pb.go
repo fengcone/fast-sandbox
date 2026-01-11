@@ -28,6 +28,7 @@ type CreateRequest struct {
 	ExposedPorts  []int32                `protobuf:"varint,3,rep,packed,name=exposed_ports,json=exposedPorts,proto3" json:"exposed_ports,omitempty"`
 	Command       []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"`
 	Args          []string               `protobuf:"bytes,5,rep,name=args,proto3" json:"args,omitempty"`
+	Namespace     string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"` // 可选，默认为 "default"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -97,6 +98,13 @@ func (x *CreateRequest) GetArgs() []string {
 	return nil
 }
 
+func (x *CreateRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 type CreateResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
@@ -160,6 +168,7 @@ func (x *CreateResponse) GetEndpoints() []string {
 type DeleteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"` // 可选，默认为 "default"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,6 +206,13 @@ func (*DeleteRequest) Descriptor() ([]byte, []int) {
 func (x *DeleteRequest) GetSandboxId() string {
 	if x != nil {
 		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *DeleteRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
 	}
 	return ""
 }
@@ -249,21 +265,23 @@ var File_api_proto_v1_fastpath_proto protoreflect.FileDescriptor
 
 const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\n" +
-	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"\x93\x01\n" +
+	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"\xb1\x01\n" +
 	"\rCreateRequest\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x19\n" +
 	"\bpool_ref\x18\x02 \x01(\tR\apoolRef\x12#\n" +
 	"\rexposed_ports\x18\x03 \x03(\x05R\fexposedPorts\x12\x18\n" +
 	"\acommand\x18\x04 \x03(\tR\acommand\x12\x12\n" +
-	"\x04args\x18\x05 \x03(\tR\x04args\"j\n" +
+	"\x04args\x18\x05 \x03(\tR\x04args\x12\x1c\n" +
+	"\tnamespace\x18\x06 \x01(\tR\tnamespace\"j\n" +
 	"\x0eCreateResponse\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1b\n" +
 	"\tagent_pod\x18\x02 \x01(\tR\bagentPod\x12\x1c\n" +
-	"\tendpoints\x18\x03 \x03(\tR\tendpoints\".\n" +
+	"\tendpoints\x18\x03 \x03(\tR\tendpoints\"L\n" +
 	"\rDeleteRequest\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\"*\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"*\n" +
 	"\x0eDeleteResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess2\xa5\x01\n" +
 	"\x0fFastPathService\x12H\n" +

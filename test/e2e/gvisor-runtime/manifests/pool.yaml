@@ -1,0 +1,17 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxPool
+metadata: { name: gvisor-test-pool }
+spec:
+  capacity: { poolMin: 1, poolMax: 1 }
+  maxSandboxesPerPod: 5
+  runtimeType: gvisor  # 使用 gVisor 运行时
+  agentTemplate:
+    spec:
+      containers:
+      - name: agent
+        image: "fast-sandbox/agent:dev"
+        env:
+        # gVisor 需要预先安装在节点上
+        # 如果 Kind 集群中没有安装 runsc，测试会跳过
+        - name: RUNTIME_TYPE
+          value: "gvisor"

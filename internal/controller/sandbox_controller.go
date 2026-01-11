@@ -41,16 +41,36 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// --- 0. 删除逻辑 (Finalizer) ---
 	finalizerName := "sandbox.fast.io/cleanup"
 	if sandbox.ObjectMeta.DeletionTimestamp != nil {
+		if !controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
+			// Finalizer 已被移除，无需处理
+			return ctrl.Result{}, nil
+		}
+
+		// 执行资源清理
+		cleanupErr := error(nil)
 		if sandbox.Status.AssignedPod != "" {
 			logger.Info("Sandbox deleting, releasing resources", "agent", sandbox.Status.AssignedPod)
+			// 注意：Registry.Release 当前没有返回错误，但为了健壮性保留错误处理模式
 			r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
+			// 清理状态字段，防止重复释放
+			sandbox.Status.AssignedPod = ""
+			sandbox.Status.NodeName = ""
 		}
-		
-		controllerutil.RemoveFinalizer(&sandbox, finalizerName)
-		if err := r.Update(ctx, &sandbox); err != nil {
-			return ctrl.Result{}, err
+
+		// 只在清理成功后移除 finalizer
+		if cleanupErr == nil {
+			controllerutil.RemoveFinalizer(&sandbox, finalizerName)
+			if err := r.Update(ctx, &sandbox); err != nil {
+				logger.Error(err, "Failed to remove finalizer after cleanup")
+				return ctrl.Result{Requeue: true}, err
+			}
+			logger.Info("Sandbox cleanup completed, finalizer removed")
+			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, nil
+
+		// 清理失败，记录错误但不移除 finalizer，让 K8s 重新触发
+		logger.Error(cleanupErr, "Sandbox cleanup failed, will retry")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, cleanupErr
 	}
 
 	if !controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
@@ -188,13 +208,22 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 	}
 
 	// 尝试更新 K8s 状态
+	// 使用自定义错误类型来区分"已被占用"和真正的"成功"
+	errAlreadyAssigned := fmt.Errorf("sandbox already assigned to another agent")
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &apiv1alpha1.Sandbox{}
 		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
 			return err
 		}
 		if latest.Status.AssignedPod != "" {
-			return nil
+			// 检查是否是被当前 agent 占用（可能是之前重试时已成功）
+			if latest.Status.AssignedPod == agent.PodName {
+				// 已被当前 agent 占用，视为成功
+				return nil
+			}
+			// 被其他 agent 占用，需要回滚
+			logger.Info("Sandbox already assigned to another agent during retry", "assignedTo", latest.Status.AssignedPod, "attempted", agent.PodName)
+			return errAlreadyAssigned
 		}
 		latest.Status.AssignedPod = agent.PodName
 		latest.Status.NodeName = agent.NodeName
@@ -203,6 +232,12 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 	})
 
 	if updateErr != nil {
+		if updateErr == errAlreadyAssigned {
+			logger.Info("Scheduling lost race, rolling back slot allocation", "agent", agent.PodName)
+			r.Registry.Release(agent.ID, sandbox)
+			// 返回重试，让调度逻辑重新选择
+			return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+		}
 		logger.Error(updateErr, "Failed to commit scheduling, rolling back slot", "agent", agent.PodName)
 		r.Registry.Release(agent.ID, sandbox)
 		return ctrl.Result{}, updateErr
