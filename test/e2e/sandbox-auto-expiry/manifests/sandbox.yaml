@@ -1,8 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata: { name: test-expiry }
-spec:
-  image: docker.io/library/alpine:latest
-  command: ["/bin/sleep", "3600"]
-  poolRef: expiry-pool
-  expireTime: "2026-01-09T07:33:42Z"

@@ -87,19 +87,27 @@
 - **状态**: ✅ FIXED
 - **E2E 测试**: 由现有测试验证
 
-### 8. Janitor 硬编码命名空间 ⏳ TODO
-- **文件**: `internal/janitor/scanner.go:60`
+### 8. Janitor 硬编码命名空间 ✅ FIXED
+- **文件**: `internal/janitor/scanner.go:43-46, 66`
 - **问题**: 始终查询 `default` 命名空间
 - **影响**: 跨命名空间的 Sandbox 会被错误标记为 orphan
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+- **修复**:
+  - 容器标签添加 `fast-sandbox.io/namespace` 字段
+  - Scanner 从标签读取命名空间而非硬编码
+  - 向后兼容：空标签默认使用 "default"
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/namespace-aware-janitor/test.sh`
 
-### 9. Pod 存在性检查逻辑错误 ⏳ TODO
-- **文件**: `internal/janitor/scanner.go:89-100`
+### 9. Pod 存在性检查逻辑错误 ✅ FIXED
+- **文件**: `internal/janitor/scanner.go:95-110`, `internal/janitor/cleanup.go:19-25, 80-111`
 - **问题**: 查询失败时认为 Pod 存在
-- **影响**: 错误的清理决策
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+- **影响**: 错误的清理决策，orphan 容器可能永久残留
+- **修复**:
+  - Scanner Lister 失败时记录错误并返回 false（允许清理）
+  - Cleanup 时添加双重验证：通过直接 K8s API 再次检查 Pod
+  - 检查 Pod DeletionTimestamp，允许清理正在删除的 Pod 的容器
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/pod-existence-verification/test.sh`
 
 ### 10. 缺少 Context 超时 ✅ FIXED
 - **文件**: `internal/agent/runtime/containerd_runtime.go:36-41, 159-200`
@@ -119,35 +127,56 @@
 - **状态**: ✅ FIXED
 - **E2E 测试**: `test/e2e/port-validation/test.sh` ✅ PASSED
 
-### 12. CRD 缺少必填字段验证 ⏳ TODO
-- **文件**: `config/crd/sandbox.fast.io_sandboxes.yaml:24-32`
+### 12. CRD 缺少必填字段验证 ✅ FIXED
+- **文件**: `config/crd/sandbox.fast.io_sandboxes.yaml:22-72`
 - **问题**: 缺少 required: ["image", "poolRef"]
 - **影响**: 允许创建无效的 Sandbox 资源
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+- **修复**:
+  - 添加 `required: ["image", "poolRef"]` 验证
+  - 添加 `envs.name` 必填字段验证
+  - 添加端口范围验证 (minimum: 1, maximum: 65535)
+  - 添加字符串 minLength 验证防止空字符串
+  - 添加字段描述文档
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/crd-validation/test.sh`
 
 ## 🟡 低危问题
 
-### 13. Goroutine 泄漏风险 ⏳ TODO
-- **文件**: `internal/controller/agentcontrol/loop.go:37-38`
-- **问题**: 如果 `syncOnce()` 执行时间超过 ticker interval，goroutine 会堆积
-- **影响**: 内存泄漏
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+### 13. Goroutine 泄漏风险 ✅ FIXED
+- **文件**: `internal/controller/agentcontrol/loop.go:35-155`, `internal/api/agent_client.go:12-105`
+- **问题**: 如果 `syncOnce()` 执行时间超过 ticker interval，可能影响系统响应性
+- **影响**: 内存泄漏风险，控制循环阻塞
+- **修复**:
+  - 添加同步进行中检测，跳过正在进行的同步
+  - 添加整体同步超时 (`Interval * 2`)
+  - 添加单个 Agent 探测超时 (`perAgentTimeout = 2s`)
+  - 记录同步耗时，超过间隔时发出警告
+  - AgentClient 默认超时从 60s 降低到 5s
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/goroutine-leak-prevention/test.sh`
 
-### 14. 内存泄漏：无界 Map 增长 ⏳ TODO
-- **文件**: `internal/controller/agentpool/registry.go:32`
-- **问题**: 已完成的 Sandbox 记录不会被清理
+### 14. 内存泄漏：无界 Map 增长 ✅ FIXED
+- **文件**: `internal/controller/agentpool/registry.go:84-104`, `internal/controller/agentcontrol/loop.go:155-160`
+- **问题**: 已删除/宕机 Agent 的记录可能永久残留
 - **影响**: 内存持续增长
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+- **修复**:
+  - 添加 `CleanupStaleAgents()` 方法，基于心跳超时清理
+  - 在控制循环中定期调用清理方法（5分钟超时）
+  - 保留现有的 Pod 列表同步清理机制
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/memory-leak-prevention/test.sh`
 
-### 15. 错误处理不一致 ⏳ TODO
-- **文件**: `internal/agent/runtime/sandbox_manager.go:77-80`
+### 15. 错误处理不一致 ✅ FIXED
+- **文件**: `internal/agent/runtime/sandbox_manager.go:42-118`
 - **问题**: 关键错误只记录日志不中断处理
-- **影响**: 状态不一致
-- **状态**: ⏳ TODO
-- **E2E 测试**: 待创建
+- **影响**: 状态不一致，调用方无法感知操作失败
+- **修复**:
+  - 收集所有创建/删除操作的错误
+  - 在函数结束时返回组合错误
+  - 保留完整的错误信息用于调试
+  - 允许部分操作完成的同时报告失败
+- **状态**: ✅ FIXED
+- **E2E 测试**: `test/e2e/error-handling-consistency/test.sh`
 
 ### 16. Release 方法不验证归属 ✅ FIXED
 - **文件**: `internal/controller/agentpool/registry.go:174-205`
@@ -161,9 +190,9 @@
 ## 修复进度
 
 - 高危问题: 5/5 (100%) ✅ (移除网络隔离"问题")
-- 中危问题: 3/6 (50%)
-- 低危问题: 1/4 (25%)
-- 总计: 9/16 (56.25%)
+- 中危问题: 6/6 (100%) ✅
+- 低危问题: 4/4 (100%) ✅
+- 总计: 15/15 (100%) ✅
 
 ---
 
@@ -171,15 +200,29 @@
 
 ### 核心文件修改
 1. `internal/controller/sandbox_controller.go` - Finalizer 处理、调度竞态修复
-2. `internal/controller/agentpool/registry.go` - 端口验证、Release 验证
+2. `internal/controller/agentpool/registry.go` - 端口验证、Release 验证、CleanupStaleAgents 方法
 3. `internal/controller/fastpath/server.go` - 重试机制、超时、命名空间支持
-4. `internal/agent/runtime/containerd_runtime.go` - 插件验证、超时、共享网络设计
-5. `api/proto/v1/fastpath.proto` - 添加 namespace 字段
+4. `internal/controller/agentcontrol/loop.go` - 同步跳过机制、超时控制、定期清理
+5. `internal/agent/runtime/containerd_runtime.go` - 插件验证、超时、共享网络设计、namespace 标签
+6. `internal/agent/runtime/runtime.go` - Runtime 接口添加 SetNamespace 方法
+7. `internal/agent/runtime/sandbox_manager.go` - 错误收集和返回机制
+8. `internal/janitor/scanner.go` - 从容器标签读取命名空间、Lister 失败时记录错误
+9. `internal/janitor/cleanup.go` - 添加直接 K8s API 双重验证
+10. `internal/api/agent_client.go` - Context 超时支持、默认超时优化
+11. `cmd/agent/main.go` - 调用 SetNamespace 设置命名空间
+12. `api/proto/v1/fastpath.proto` - 添加 namespace 字段
+13. `config/crd/sandbox.fast.io_sandboxes.yaml` - 添加必填字段验证、端口范围验证
 
 ### 新增 E2E 测试
 1. `test/e2e/finalizer-cleanup/test.sh` - Finalizer 清理测试
 2. `test/e2e/port-validation/test.sh` - 端口范围验证测试
 3. `test/e2e/gvisor-runtime/test.sh` - gVisor 运行时测试
+4. `test/e2e/namespace-aware-janitor/test.sh` - 跨命名空间 Janitor 测试
+5. `test/e2e/pod-existence-verification/test.sh` - Pod 存在性检查测试
+6. `test/e2e/crd-validation/test.sh` - CRD 必填字段验证测试
+7. `test/e2e/goroutine-leak-prevention/test.sh` - Goroutine 泄漏防护测试
+8. `test/e2e/memory-leak-prevention/test.sh` - 内存泄漏防护测试
+9. `test/e2e/error-handling-consistency/test.sh` - 错误处理一致性测试
 
 ---
 

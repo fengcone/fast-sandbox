@@ -33,10 +33,16 @@ func (j *Janitor) Scan(ctx context.Context) {
 		agentUID := labelsMap["fast-sandbox.io/agent-uid"]
 		agentName := labelsMap["fast-sandbox.io/agent-name"]
 		sandboxName := labelsMap["fast-sandbox.io/sandbox-name"]
+		sandboxNamespace := labelsMap["fast-sandbox.io/namespace"]
 		claimUID := labelsMap["fast-sandbox.io/claim-uid"]
-		
+
 		if agentUID == "" || sandboxName == "" {
 			continue
+		}
+
+		// 如果没有 namespace 标签，使用 "default" 作为默认值（向后兼容）
+		if sandboxNamespace == "" {
+			sandboxNamespace = "default"
 		}
 
 		info, _ := c.Info(ctx)
@@ -57,7 +63,7 @@ func (j *Janitor) Scan(ctx context.Context) {
 		// 判定逻辑 2: Sandbox CRD 是否存在？
 		if !shouldCleanup {
 			var sb apiv1alpha1.Sandbox
-			err := j.K8sClient.Get(ctx, client.ObjectKey{Name: sandboxName, Namespace: "default"}, &sb)
+			err := j.K8sClient.Get(ctx, client.ObjectKey{Name: sandboxName, Namespace: sandboxNamespace}, &sb)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
 					shouldCleanup = true
@@ -89,7 +95,11 @@ func (j *Janitor) Scan(ctx context.Context) {
 func (j *Janitor) podExists(uid string) bool {
 	pods, err := j.podLister.List(labels.Everything())
 	if err != nil {
-		return true // 安全起见，出错认为存在
+		// Lister 失败时记录错误，返回 false 允许清理
+		// 这样即使 Lister 出问题，orphan 容器也能被清理
+		// 实际清理前还会再次验证 Agent Pod 状态
+		log.Log.Error(err, "Failed to list pods for orphan detection", "agent-uid", uid)
+		return false
 	}
 	for _, p := range pods {
 		if string(p.UID) == uid {

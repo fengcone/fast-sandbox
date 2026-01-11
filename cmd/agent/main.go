@@ -37,6 +37,9 @@ func main() {
 	}
 	defer rt.Close()
 
+	// 设置命名空间，用于在容器标签中标记
+	rt.SetNamespace(namespace)
+
 	log.Printf("Runtime initialized successfully: %s\n", runtimeTypeStr)
 
 	// 创建 SandboxManager

@@ -20,15 +20,55 @@ spec:
         properties:
           spec:
             type: object
+            required: ["image", "poolRef"]
             properties:
-              image: {type: string}
-              command: {type: array, items: {type: string}}
-              args: {type: array, items: {type: string}}
-              poolRef: {type: string}
+              image:
+                type: string
+                description: "Container image to run (e.g., nginx:alpine)"
+                minLength: 1
+              command:
+                type: array
+                items: {type: string}
+                description: "Override the image's ENTRYPOINT"
+              args:
+                type: array
+                items: {type: string}
+                description: "Override the image's CMD"
+              envs:
+                type: array
+                items:
+                  type: object
+                  required: ["name"]
+                  properties:
+                    name: {type: string}
+                    value: {type: string}
+                    valueFrom: {type: object}
+                description: "Environment variables to set in the container"
+              workingDir:
+                type: string
+                description: "Container's working directory"
+              poolRef:
+                type: string
+                description: "Name of the SandboxPool to schedule this sandbox to"
+                minLength: 1
               expireTime: {type: string, format: date-time}
-              exposedPorts: {type: array, items: {type: integer}}
-              failurePolicy: {type: string, enum: ["Manual", "AutoRecreate"]}
-              recoveryTimeoutSeconds: {type: integer}
+              exposedPorts:
+                type: array
+                items:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                description: "Ports the application listens on"
+              failurePolicy:
+                type: string
+                enum: ["Manual", "AutoRecreate"]
+                default: "Manual"
+                description: "Recovery strategy when agent is lost"
+              recoveryTimeoutSeconds:
+                type: integer
+                minimum: 1
+                default: 60
+                description: "Seconds to wait before recovery action"
               resetRevision: {type: string, format: date-time}
           status:
             type: object

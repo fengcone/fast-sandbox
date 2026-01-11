@@ -29,6 +29,7 @@ type ContainerdRuntime struct {
 	netnsPath         string                      // Pod 的 network namespace 路径
 	agentID           string                      // Agent 名称 (Pod Name)
 	agentUID          string                      // Agent 唯一标识 (Pod UID)
+	agentNamespace    string                      // Agent 运行的命名空间
 	infraMgr          *infra.Manager              // 基础设施插件管理
 	allowedPluginPaths []string                   // 允许的插件路径白名单
 }
@@ -353,10 +354,18 @@ func (r *ContainerdRuntime) prepareLabels(config *SandboxConfig) map[string]stri
 		"fast-sandbox.io/managed":      "true",
 		"fast-sandbox.io/agent-name":   r.agentID,
 		"fast-sandbox.io/agent-uid":    r.agentUID,
+		"fast-sandbox.io/namespace":    r.agentNamespace,
 		"fast-sandbox.io/id":           config.SandboxID,
 		"fast-sandbox.io/claim-uid":    config.ClaimUID,
 		"fast-sandbox.io/sandbox-name": config.ClaimName, // 规范化标签名
 	}
+}
+
+// SetNamespace 设置 Agent 运行的命名空间
+func (r *ContainerdRuntime) SetNamespace(ns string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.agentNamespace = ns
 }
 
 func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string) error {

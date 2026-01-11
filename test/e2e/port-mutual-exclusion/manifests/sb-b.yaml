@@ -1,8 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata: { name: sb-b }
-spec:
-  image: docker.io/library/alpine:latest
-  command: ["/bin/sleep", "3600"]
-  poolRef: port-test-pool
-  exposedPorts: [8080]

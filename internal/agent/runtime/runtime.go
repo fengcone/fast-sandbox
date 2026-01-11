@@ -41,6 +41,10 @@ type Runtime interface {
 	// socketPath: 容器运行时的 socket 路径
 	Initialize(ctx context.Context, socketPath string) error
 
+	// SetNamespace 设置 Agent 运行的命名空间
+	// 用于在容器标签中标记命名空间信息
+	SetNamespace(ns string)
+
 	// CreateSandbox 创建并启动一个 sandbox 容器
 	// 返回创建的 sandbox 元数据
 	CreateSandbox(ctx context.Context, config *SandboxConfig) (*SandboxMetadata, error)

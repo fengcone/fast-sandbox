@@ -35,11 +35,11 @@ type AgentRegistry interface {
 	RegisterOrUpdate(info AgentInfo)
 	GetAllAgents() []AgentInfo
 	GetAgentByID(id AgentID) (AgentInfo, bool)
-	
+
 	// Allocate 尝试根据 Sandbox 的需求（PoolRef, ExposedPorts 等）原子分配一个插槽
 	// 优先选择已有镜像的节点
 	Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
-	
+
 	// Release 释放指定 Agent 上的 Sandbox 占用的插槽和端口
 	Release(id AgentID, sb *apiv1alpha1.Sandbox)
 
@@ -47,6 +47,9 @@ type AgentRegistry interface {
 	Restore(ctx context.Context, c client.Reader) error
 
 	Remove(id AgentID)
+
+	// CleanupStaleAgents 移除超过指定时间未更新的 Agent
+	CleanupStaleAgents(timeout time.Duration) int
 }
 
 // InMemoryRegistry is a simple in-memory implementation of AgentRegistry.
@@ -65,15 +68,42 @@ func NewInMemoryRegistry() *InMemoryRegistry {
 func (r *InMemoryRegistry) RegisterOrUpdate(info AgentInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if old, ok := r.agents[info.ID]; ok {
 		info.Allocated = old.Allocated
 		info.UsedPorts = old.UsedPorts
 	}
+
 	if info.UsedPorts == nil {
 		info.UsedPorts = make(map[int32]bool)
 	}
+	if info.SandboxStatuses == nil {
+		info.SandboxStatuses = make(map[string]api.SandboxStatus)
+	}
+
 	r.agents[info.ID] = info
+}
+
+// CleanupStaleAgents 移除超过指定时间未更新的 Agent
+// 用于防止已删除/宕机 Agent 的记录永久占用内存
+func (r *InMemoryRegistry) CleanupStaleAgents(timeout time.Duration) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	var staleAgents []AgentID
+
+	for id, a := range r.agents {
+		if now.Sub(a.LastHeartbeat) > timeout {
+			staleAgents = append(staleAgents, id)
+		}
+	}
+
+	for _, id := range staleAgents {
+		delete(r.agents, id)
+	}
+
+	return len(staleAgents)
 }
 
 func (r *InMemoryRegistry) GetAllAgents() []AgentInfo {

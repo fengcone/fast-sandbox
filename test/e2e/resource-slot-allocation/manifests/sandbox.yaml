@@ -1,4 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata: { name: sb-slot-check }
-spec: { image: "docker.io/library/alpine:latest", command: ["/bin/sleep", "3600"], poolRef: resource-test-pool }

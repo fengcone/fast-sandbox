@@ -1,8 +1,0 @@
-apiVersion: sandbox.fast.io/v1alpha1
-kind: Sandbox
-metadata: { name: sb-finalizer-b }
-spec:
-  image: docker.io/library/alpine:latest
-  command: ["/bin/sleep", "3600"]
-  poolRef: finalizer-test-pool
-  exposedPorts: [8081]
