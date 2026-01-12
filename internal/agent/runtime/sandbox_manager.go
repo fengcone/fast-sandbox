@@ -2,13 +2,12 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
+	"time"
 
 	"fast-sandbox/internal/api"
 )
@@ -39,82 +38,88 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 	}
 }
 
-// SyncSandboxes 同步期望的 sandbox 列表
-// 这是 Controller 调用的主要接口，实现声明式状态同步
-// 返回错误时表示部分或全部操作失败，调用方应根据错误信息决定是否重试
-func (m *SandboxManager) SyncSandboxes(ctx context.Context, desired []api.SandboxSpec) error {
+// CreateSandbox 创建单个 sandbox（命令式，幂等）
+// 如果 sandbox 已存在，直接返回成功（幂等性）
+// 返回创建时间戳供 Janitor 判断孤儿状态
+func (m *SandboxManager) CreateSandbox(ctx context.Context, spec api.SandboxSpec) (*api.CreateSandboxResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. 获取当前所有 Sandboxes
-	currentSandboxes, err := m.runtime.ListSandboxes(ctx)
+	// 1. 幂等检查：已存在则直接返回成功
+	if existing, _ := m.runtime.GetSandbox(ctx, spec.SandboxID); existing != nil {
+		log.Printf("Sandbox %s already exists, returning success (idempotent)", spec.SandboxID)
+		return &api.CreateSandboxResponse{
+			Success:   true,
+			SandboxID: spec.SandboxID,
+			CreatedAt: existing.CreatedAt,
+		}, nil
+	}
+
+	// 2. 不存在则创建
+	config := &SandboxConfig{
+		SandboxID: spec.SandboxID,
+		ClaimUID:  spec.ClaimUID,
+		ClaimName: spec.ClaimName,
+		Image:     spec.Image,
+		Command:   spec.Command,
+		Args:      spec.Args,
+		Env:       spec.Env,
+		CPU:       spec.CPU,
+		Memory:    spec.Memory,
+	}
+
+	createdAt := time.Now().Unix()
+	metadata, err := m.runtime.CreateSandbox(ctx, config)
 	if err != nil {
-		return fmt.Errorf("failed to list current sandboxes: %w", err)
+		log.Printf("Failed to create sandbox %s: %v", spec.SandboxID, err)
+		return &api.CreateSandboxResponse{
+			Success: false,
+			Message: fmt.Sprintf("create failed: %v", err),
+		}, err
 	}
 
-	currentMap := make(map[string]*SandboxMetadata)
-	for _, sb := range currentSandboxes {
-		currentMap[sb.SandboxID] = sb
+	// 更新本地缓存
+	m.sandboxes[spec.SandboxID] = metadata
+
+	log.Printf("Created sandbox %s (image: %s)", spec.SandboxID, spec.Image)
+	return &api.CreateSandboxResponse{
+		Success:   true,
+		SandboxID: spec.SandboxID,
+		CreatedAt: createdAt,
+	}, nil
+}
+
+// DeleteSandbox 删除单个 sandbox（命令式，幂等）
+// 如果 sandbox 不存在，直接返回成功（幂等性）
+func (m *SandboxManager) DeleteSandbox(ctx context.Context, sandboxID string) (*api.DeleteSandboxResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. 检查是否存在
+	if _, err := m.runtime.GetSandbox(ctx, sandboxID); err != nil {
+		// 不存在，视为删除成功（幂等性）
+		log.Printf("Sandbox %s does not exist, returning success (idempotent)", sandboxID)
+		return &api.DeleteSandboxResponse{
+			Success: true,
+		}, nil
 	}
 
-	desiredMap := make(map[string]api.SandboxSpec)
-	for _, spec := range desired {
-		desiredMap[spec.SandboxID] = spec
+	// 2. 存在则删除
+	if err := m.runtime.DeleteSandbox(ctx, sandboxID); err != nil {
+		log.Printf("Failed to delete sandbox %s: %v", sandboxID, err)
+		return &api.DeleteSandboxResponse{
+			Success: false,
+			Message: fmt.Sprintf("delete failed: %v", err),
+		}, err
 	}
 
-	// 收集所有操作错误
-	var createErrors []string
-	var deleteErrors []string
+	// 更新本地缓存
+	delete(m.sandboxes, sandboxID)
 
-	// 2. 找出需要创建的 (在 Desired 中，不在 Current 中)
-	for id, spec := range desiredMap {
-		if _, exists := currentMap[id]; !exists {
-			// 创建新的 Sandbox
-			config := &SandboxConfig{
-				SandboxID: spec.SandboxID,
-				ClaimUID:  spec.ClaimUID,
-				ClaimName: spec.ClaimName,
-				Image:     spec.Image,
-				Command:   spec.Command,
-				Args:      spec.Args,
-				Env:       spec.Env,
-				CPU:       spec.CPU,
-				Memory:    spec.Memory,
-			}
-			log.Printf("Creating sandbox: %s (Image: %s)", id, spec.Image)
-			if _, err := m.runtime.CreateSandbox(ctx, config); err != nil {
-				errMsg := fmt.Sprintf("create %s: %v", id, err)
-				log.Printf("Failed to create sandbox %s: %v", id, err)
-				createErrors = append(createErrors, errMsg)
-			}
-		}
-	}
-
-	// 3. 找出需要删除的 (在 Current 中，不在 Desired 中)
-	for id := range currentMap {
-		if _, exists := desiredMap[id]; !exists {
-			log.Printf("Deleting sandbox: %s", id)
-			if err := m.runtime.DeleteSandbox(ctx, id); err != nil {
-				errMsg := fmt.Sprintf("delete %s: %v", id, err)
-				log.Printf("Failed to delete sandbox %s: %v", id, err)
-				deleteErrors = append(deleteErrors, errMsg)
-			}
-		}
-	}
-
-	// 如果有任何错误，返回组合错误
-	if len(createErrors) > 0 || len(deleteErrors) > 0 {
-		var allErrors []string
-		if len(createErrors) > 0 {
-			allErrors = append(allErrors, fmt.Sprintf("create errors: [%s]", strings.Join(createErrors, "; ")))
-		}
-		if len(deleteErrors) > 0 {
-			allErrors = append(allErrors, fmt.Sprintf("delete errors: [%s]", strings.Join(deleteErrors, "; ")))
-		}
-		return errors.New(strings.Join(allErrors, ", "))
-	}
-
-	return nil
+	log.Printf("Deleted sandbox %s", sandboxID)
+	return &api.DeleteSandboxResponse{
+		Success: true,
+	}, nil
 }
 
 // GetSandbox 获取指定 sandbox 的元数据

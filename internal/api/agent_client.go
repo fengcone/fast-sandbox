@@ -36,32 +36,70 @@ func (c *AgentClient) SetTimeout(timeout time.Duration) {
 	c.httpClient.Timeout = timeout
 }
 
-// SyncSandboxes sends the desired sandboxes to the agent.
-func (c *AgentClient) SyncSandboxes(agentEndpoint string, req *SandboxesRequest) error {
-	url := fmt.Sprintf("http://%s/api/v1/agent/sync", agentEndpoint)
+// CreateSandbox sends a create sandbox request to the agent.
+func (c *AgentClient) CreateSandbox(agentEndpoint string, req *CreateSandboxRequest) (*CreateSandboxResponse, error) {
+	url := fmt.Sprintf("http://%s/api/v1/agent/create", agentEndpoint)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("sync failed with status: %d", resp.StatusCode)
+	var createResp CreateSandboxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
+		return nil, err
 	}
 
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		return &createResp, fmt.Errorf("create failed with status: %d, message: %s", resp.StatusCode, createResp.Message)
+	}
+
+	return &createResp, nil
+}
+
+// DeleteSandbox sends a delete sandbox request to the agent.
+func (c *AgentClient) DeleteSandbox(agentEndpoint string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error) {
+	url := fmt.Sprintf("http://%s/api/v1/agent/delete", agentEndpoint)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var deleteResp DeleteSandboxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&deleteResp); err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &deleteResp, fmt.Errorf("delete failed with status: %d, message: %s", resp.StatusCode, deleteResp.Message)
+	}
+
+	return &deleteResp, nil
 }
 
 // GetAgentStatus fetches the current status of an agent.

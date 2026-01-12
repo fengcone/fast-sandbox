@@ -7,9 +7,20 @@ option go_package = "fast-sandbox/api/v1;fastpathv1";
 service FastPathService {
   // CreateSandbox 极速创建沙箱，绕过 K8s 控制面延迟
   rpc CreateSandbox(CreateRequest) returns (CreateResponse);
-  
+
   // DeleteSandbox 极速删除沙箱
   rpc DeleteSandbox(DeleteRequest) returns (DeleteResponse);
+}
+
+// ConsistencyMode 定义创建 sandbox 的一致性模式
+enum ConsistencyMode {
+  // FAST 模式：先创建 Agent，后写 CRD（默认）
+  // 最低延迟，但 CRD 写入失败可能导致正在使用的 sandbox 被清理
+  FAST = 0;
+
+  // STRONG 模式：先写 CRD，后创建 Agent
+  // 延迟略高，但保证强一致性
+  STRONG = 1;
 }
 
 message CreateRequest {
@@ -19,6 +30,7 @@ message CreateRequest {
   repeated string command = 4;
   repeated string args = 5;
   string namespace = 6; // 可选，默认为 "default"
+  ConsistencyMode consistency_mode = 7; // 可选，默认使用 Controller 配置
 }
 
 message CreateResponse {

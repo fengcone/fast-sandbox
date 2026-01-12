@@ -5,6 +5,7 @@ import (
 	"flag"
 	"net"
 	"os"
+	"time"
 
 	"fast-sandbox/internal/api"
 
@@ -38,8 +39,12 @@ func init() {
 func main() {
 	var metricsAddr string
 	var probeAddr string
+	var fastpathConsistencyMode string
+	var fastpathOrphanTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&fastpathConsistencyMode, "fastpath-consistency-mode", "fast", "Fast-Path consistency mode: fast (default) or strong")
+	flag.DurationVar(&fastpathOrphanTimeout, "fastpath-orphan-timeout", 10*time.Second, "Fast-Path orphan cleanup timeout (for Fast mode)")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -93,12 +98,20 @@ func main() {
 		os.Exit(1)
 	}
 	grpcServer := grpc.NewServer()
+
+	// 解析一致性模式
+	consistencyMode := api.ConsistencyModeFast
+	if fastpathConsistencyMode == "strong" {
+		consistencyMode = api.ConsistencyModeStrong
+	}
+
 	fastpathv1.RegisterFastPathServiceServer(grpcServer, &fastpath.Server{
-		K8sClient:   mgr.GetClient(),
-		Registry:    reg,
-		AgentClient: agentHTTPClient,
+		K8sClient:            mgr.GetClient(),
+		Registry:             reg,
+		AgentClient:          agentHTTPClient,
+		DefaultConsistencyMode: consistencyMode,
 	})
-	setupLog.Info("Starting Fast-Path gRPC server", "port", 9090)
+	setupLog.Info("Starting Fast-Path gRPC server", "port", 9090, "consistency-mode", consistencyMode, "orphan-timeout", fastpathOrphanTimeout)
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
 			setupLog.Error(err, "failed to serve gRPC")

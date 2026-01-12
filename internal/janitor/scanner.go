@@ -46,8 +46,13 @@ func (j *Janitor) Scan(ctx context.Context) {
 		}
 
 		info, _ := c.Info(ctx)
-		// 安全缓冲：仅清理创建超过 60 秒的容器
-		if time.Since(info.CreatedAt) < 60*time.Second {
+		// 安全缓冲：仅清理创建超过 OrphanTimeout 的容器
+		// 这是为了支持 Fast 模式，允许 CRD 异步创建
+		timeout := j.OrphanTimeout
+		if timeout == 0 {
+			timeout = defaultOrphanTimeout
+		}
+		if time.Since(info.CreatedAt) < timeout {
 			continue
 		}
 

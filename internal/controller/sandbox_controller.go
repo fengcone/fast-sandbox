@@ -50,7 +50,12 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		cleanupErr := error(nil)
 		if sandbox.Status.AssignedPod != "" {
 			logger.Info("Sandbox deleting, releasing resources", "agent", sandbox.Status.AssignedPod)
-			// 注意：Registry.Release 当前没有返回错误，但为了健壮性保留错误处理模式
+			// 先删除 Agent 侧的 sandbox
+			if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
+				logger.Error(err, "Failed to delete sandbox from agent, will retry")
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+			}
+			// 然后释放 Registry 插槽
 			r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
 			// 清理状态字段，防止重复释放
 			sandbox.Status.AssignedPod = ""
@@ -190,7 +195,19 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if isConnected {
-			r.syncAgent(ctx, sandbox.Status.AssignedPod)
+			// 命令式创建：如果 phase 不是 "Bound" 或 "Running"，尝试在 Agent 上创建
+			if sandbox.Status.Phase == "" || sandbox.Status.Phase == "Pending" {
+				if err := r.handleCreateOnAgent(ctx, &sandbox); err != nil {
+					logger.Error(err, "Failed to create sandbox on agent, will retry")
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
+				// 创建成功，更新状态
+				sandbox.Status.Phase = "Bound"
+				if err := r.Status().Update(ctx, &sandbox); err != nil {
+					logger.Error(err, "Failed to update status after agent create")
+					return ctrl.Result{}, err
+				}
+			}
 			r.updateStatusFromRegistry(ctx, &sandbox)
 		}
 	}
@@ -227,7 +244,7 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 		}
 		latest.Status.AssignedPod = agent.PodName
 		latest.Status.NodeName = agent.NodeName
-		latest.Status.Phase = "Bound"
+		latest.Status.Phase = "Pending" // 先设为 Pending，由后续 Reconcile 在 Agent 上创建
 		return r.Status().Update(ctx, latest)
 	})
 
@@ -276,29 +293,56 @@ func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbo
 	return nil
 }
 
-func (r *SandboxReconciler) syncAgent(ctx context.Context, agentPodName string) error {
-	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(agentPodName))
-	if !ok { return nil }
-
-	var sandboxList apiv1alpha1.SandboxList
-	if err := r.List(ctx, &sandboxList, client.MatchingFields{"status.assignedPod": agentPodName}); err != nil {
-		return err
+// syncAgent 已废弃：改用命令式 CreateSandbox/DeleteSandbox
+// 旧逻辑被 handleCreateOnAgent 替代
+func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	if sandbox.Status.AssignedPod == "" {
+		return fmt.Errorf("no assigned pod")
 	}
 
-	var specs []api.SandboxSpec
-	for _, sb := range sandboxList.Items {
-		specs = append(specs, api.SandboxSpec{
-			SandboxID: sb.Name,
-			ClaimUID:  string(sb.UID),
-			ClaimName: sb.Name,
-			Image:     sb.Spec.Image,
-			Command:   sb.Spec.Command,
-			Args:      sb.Spec.Args,
-		})
+	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !ok {
+		return fmt.Errorf("agent not found: %s", sandbox.Status.AssignedPod)
 	}
 
 	endpoint := fmt.Sprintf("%s:8081", agentInfo.PodIP)
-	return r.AgentClient.SyncSandboxes(endpoint, &api.SandboxesRequest{AgentID: agentPodName, SandboxSpecs: specs})
+	createReq := &api.CreateSandboxRequest{
+		Sandbox: api.SandboxSpec{
+			SandboxID: sandbox.Name,
+			ClaimUID:  string(sandbox.UID),
+			ClaimName: sandbox.Name,
+			Image:     sandbox.Spec.Image,
+			Command:   sandbox.Spec.Command,
+			Args:      sandbox.Spec.Args,
+		},
+	}
+
+	_, err := r.AgentClient.CreateSandbox(endpoint, createReq)
+	return err
+}
+
+// deleteFromAgent 删除 Agent 侧的 sandbox（用于 Finalizer 清理）
+func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	if sandbox.Status.AssignedPod == "" {
+		return nil
+	}
+
+	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !ok {
+		// Agent 已不存在，视为删除成功
+		return nil
+	}
+
+	endpoint := fmt.Sprintf("%s:8081", agentInfo.PodIP)
+	deleteReq := &api.DeleteSandboxRequest{
+		SandboxID: sandbox.Name,
+	}
+
+	_, err := r.AgentClient.DeleteSandbox(endpoint, deleteReq)
+	if err != nil {
+		return fmt.Errorf("failed to delete sandbox from agent: %w", err)
+	}
+	return nil
 }
 
 func (r *SandboxReconciler) updateCondition(sandbox *apiv1alpha1.Sandbox, newCond metav1.Condition) bool {

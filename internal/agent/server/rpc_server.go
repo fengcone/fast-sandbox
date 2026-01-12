@@ -27,34 +27,67 @@ func NewAgentServer(addr string, sandboxManager *runtime.SandboxManager) *AgentS
 // Start starts the HTTP server.
 func (s *AgentServer) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/agent/sync", s.handleSync)
+	mux.HandleFunc("/api/v1/agent/create", s.handleCreate)
+	mux.HandleFunc("/api/v1/agent/delete", s.handleDelete)
 	mux.HandleFunc("/api/v1/agent/status", s.handleStatus)
 
 	log.Printf("Starting agent HTTP server on %s\n", s.addr)
 	return http.ListenAndServe(s.addr, mux)
 }
 
-func (s *AgentServer) handleSync(w http.ResponseWriter, r *http.Request) {
+// handleCreate handles create sandbox requests.
+func (s *AgentServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req api.SandboxesRequest
+	var req api.CreateSandboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := s.sandboxManager.SyncSandboxes(r.Context(), req.SandboxSpecs); err != nil {
-		log.Printf("Sync failed: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	resp, err := s.sandboxManager.CreateSandbox(r.Context(), req.Sandbox)
+	if err != nil {
+		log.Printf("Create sandbox failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
+// handleDelete handles delete sandbox requests.
+func (s *AgentServer) handleDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.DeleteSandboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.sandboxManager.DeleteSandbox(r.Context(), req.SandboxID)
+	if err != nil {
+		log.Printf("Delete sandbox failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleStatus handles status queries.
 func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -83,19 +116,19 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 			SandboxID: sb.SandboxID,
 			ClaimUID:  sb.ClaimUID,
 			Phase:     sb.Status,
-			// Message: ...,
+			CreatedAt: sb.CreatedAt, // Include creation time for orphan cleanup
 		})
 	}
-    
-    // Node Name from Env
-    nodeName := os.Getenv("NODE_NAME")
+
+	// Node Name from Env
+	nodeName := os.Getenv("NODE_NAME")
 
 	status := api.AgentStatus{
-		AgentID:        os.Getenv("POD_NAME"), // Use Pod Name as Agent ID
-        NodeName:       nodeName,
-		Capacity:       s.sandboxManager.GetCapacity(),
-		Allocated:      len(sandboxes),
-		Images:         images,
+		AgentID:         os.Getenv("POD_NAME"), // Use Pod Name as Agent ID
+		NodeName:        nodeName,
+		Capacity:        s.sandboxManager.GetCapacity(),
+		Allocated:       len(sandboxes),
+		Images:          images,
 		SandboxStatuses: sbStatuses,
 	}
 

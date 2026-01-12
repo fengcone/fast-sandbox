@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"fast-sandbox/internal/janitor"
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
@@ -21,14 +22,15 @@ import (
 )
 
 func main() {
-    // ... (保持 flag 定义不变)
 	var kubeconfig string
 	var nodeName string
 	var ctrdSocket string
+	var orphanTimeout time.Duration
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file")
 	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"), "Name of the node this janitor is running on")
 	flag.StringVar(&ctrdSocket, "containerd-socket", "/run/containerd/containerd.sock", "Path to containerd socket")
+	flag.DurationVar(&orphanTimeout, "orphan-timeout", 10*time.Second, "Orphan cleanup timeout for Fast mode (containers older than this without CRD will be cleaned)")
 	flag.Parse()
 
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
@@ -80,7 +82,9 @@ func main() {
 	defer stop()
 
 	j := janitor.NewJanitor(clientset, ctrdClient, nodeName)
-	j.K8sClient = k8sClient // 注入通用客户端
+	j.K8sClient = k8sClient
+	j.OrphanTimeout = orphanTimeout
+	logger.Info("Starting Janitor", "node", nodeName, "orphan-timeout", orphanTimeout)
 	if err := j.Run(ctx); err != nil {
 		logger.Error(err, "Janitor exited with error")
 		os.Exit(1)

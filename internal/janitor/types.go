@@ -11,20 +11,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	// defaultOrphanTimeout 是孤儿清理的默认超时时间
+	// 在 Fast 模式下，如果容器创建后 CRD 在此时间内仍未出现，则判定为孤儿
+	defaultOrphanTimeout = 10 * time.Second
+)
+
 type Janitor struct {
 	kubeClient kubernetes.Interface
-	K8sClient  client.Client // 增加通用客户端以访问 CRD
+	K8sClient  client.Client
 	ctrdClient *containerd.Client
 	nodeName   string
-	namespaces []string 
+	namespaces []string
 
 	queue     workqueue.RateLimitingInterface
 	podLister listerv1.PodLister
-	
+
 	// 用于防止并发清理同一个容器
 	cleaning sync.Map // containerID -> struct{}{}
 
-	scanInterval time.Duration
+	scanInterval   time.Duration
+	OrphanTimeout  time.Duration // Fast 模式下的孤儿清理超时时间
 }
 
 // CleanupTask 定义一个清理任务
