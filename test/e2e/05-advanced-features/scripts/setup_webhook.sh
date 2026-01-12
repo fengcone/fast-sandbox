@@ -5,8 +5,8 @@
 
 set -e
 
-# 预期命名空间
-WEBHOOK_NS=${TEST_NS:-"e2e-webhook-test"}
+# 预期命名空间：强制隔离，不使用 TEST_NS
+WEBHOOK_NS="e2e-webhook-isolated"
 
 echo "=== 部署 ValidatingWebhook 用于孤儿测试 ==="
 
@@ -14,9 +14,9 @@ echo "=== 部署 ValidatingWebhook 用于孤儿测试 ==="
 kubectl create namespace "$WEBHOOK_NS" 2>/dev/null || true
 
 # 2. 编译 webhook server (使用静态编译)
-WEBHOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR_HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "编译 webhook server..."
-cd "$WEBHOOK_DIR/webhook"
+cd "$SCRIPT_DIR_HOOK/../webhook"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o webhook-server main.go
 if [ ! -f webhook-server ]; then
     echo "❌ 编译失败，请检查 Go 环境"

@@ -81,6 +81,7 @@ type CreateRequest struct {
 	Args            []string               `protobuf:"bytes,5,rep,name=args,proto3" json:"args,omitempty"`
 	Namespace       string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`                                                                      // 可选，默认为 "default"
 	ConsistencyMode ConsistencyMode        `protobuf:"varint,7,opt,name=consistency_mode,json=consistencyMode,proto3,enum=fastpath.v1.ConsistencyMode" json:"consistency_mode,omitempty"` // 可选，默认使用 Controller 配置
+	Name            string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`                                                                                // 可选，指定沙箱名称（用于测试故障注入）
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -162,6 +163,13 @@ func (x *CreateRequest) GetConsistencyMode() ConsistencyMode {
 		return x.ConsistencyMode
 	}
 	return ConsistencyMode_FAST
+}
+
+func (x *CreateRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
 }
 
 type CreateResponse struct {
@@ -324,7 +332,7 @@ var File_api_proto_v1_fastpath_proto protoreflect.FileDescriptor
 
 const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\n" +
-	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"\xfa\x01\n" +
+	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"\x8e\x02\n" +
 	"\rCreateRequest\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x19\n" +
 	"\bpool_ref\x18\x02 \x01(\tR\apoolRef\x12#\n" +
@@ -332,7 +340,8 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\acommand\x18\x04 \x03(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x05 \x03(\tR\x04args\x12\x1c\n" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12G\n" +
-	"\x10consistency_mode\x18\a \x01(\x0e2\x1c.fastpath.v1.ConsistencyModeR\x0fconsistencyMode\"j\n" +
+	"\x10consistency_mode\x18\a \x01(\x0e2\x1c.fastpath.v1.ConsistencyModeR\x0fconsistencyMode\x12\x12\n" +
+	"\x04name\x18\b \x01(\tR\x04name\"j\n" +
 	"\x0eCreateResponse\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1b\n" +

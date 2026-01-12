@@ -31,6 +31,7 @@ message CreateRequest {
   repeated string args = 5;
   string namespace = 6; // 可选，默认为 "default"
   ConsistencyMode consistency_mode = 7; // 可选，默认使用 Controller 配置
+  string name = 8; // 可选，指定沙箱名称（用于测试故障注入）
 }
 
 message CreateResponse {

@@ -5,7 +5,7 @@
 set -e
 
 # 预期命名空间
-WEBHOOK_NS=${TEST_NS:-"e2e-webhook-test"}
+WEBHOOK_NS="e2e-webhook-isolated"
 
 echo "=== 清理 ValidatingWebhook 测试资源 ==="
 
@@ -16,7 +16,7 @@ kubectl delete validatingwebhookconfiguration sandbox-orphan-test-webhook --igno
 kubectl delete namespace "$WEBHOOK_NS" --ignore-not-found=true --timeout=30s 2>/dev/null || true
 
 # 3. 清理本地编译产物
-WEBHOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-rm -f "$WEBHOOK_DIR/webhook/webhook-server"
+WEBHOOK_DIR_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+rm -f "$WEBHOOK_DIR_LOCAL/../webhook/webhook-server"
 
 echo "✓ ValidatingWebhook 清理完成"

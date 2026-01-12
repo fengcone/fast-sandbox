@@ -9,98 +9,97 @@ CONTROLLER_IMAGE="fast-sandbox/controller:dev"
 AGENT_IMAGE="fast-sandbox/agent:dev"
 JANITOR_IMAGE="fast-sandbox/janitor:dev"
 
-# 环境变量：设置为 "true" 时跳过构建镜像（用于快速重测）
+# 环境变量支持
 export SKIP_BUILD=${SKIP_BUILD:-""}
+export FORCE_RECREATE_CLUSTER=${FORCE_RECREATE_CLUSTER:-"false"}
 
-# --- 1. 清理测试资源 (每次测试前运行) ---
+# --- 0. 集群管理 (强制重建模式) ---
+function ensure_cluster() {
+    if [ "$FORCE_RECREATE_CLUSTER" = "true" ]; then
+        echo "⚠️ [FORCE_RECREATE_CLUSTER] 正在物理销毁并重建 KIND 集群: $CLUSTER_NAME"
+        kind delete cluster --name "$CLUSTER_NAME" || true
+        # 强制使用本地镜像，避免 pull 失败
+        kind create cluster --name "$CLUSTER_NAME" --image kindest/node:v1.35.0
+        echo "等待节点就绪..."
+        kubectl wait --for=condition=Ready node/"$CLUSTER_NAME-control-plane" --timeout=60s
+    fi
+}
+
+# --- 1. 清理测试资源 ---
 function cleanup_test_resources() {
     local test_namespace=$1
     echo "=== [Cleanup] 清理测试资源 ==="
 
-    # 删除指定的测试命名空间
+    if [ "$FORCE_RECREATE_CLUSTER" = "true" ]; then
+        echo "由于开启了强制重建模式，跳过细粒度清理，由 ensure_cluster 处理。"
+        return
+    fi
+
     if [ -n "$test_namespace" ]; then
         kubectl delete namespace "$test_namespace" --ignore-not-found=true --timeout=60s 2>/dev/null || true
     fi
 
-    # 清理所有 e2e- 开头的测试命名空间
     kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' | grep -o 'e2e-[^[:space:]]*' 2>/dev/null | while read -r ns; do
         kubectl delete namespace "$ns" --ignore-not-found=true --timeout=30s 2>/dev/null || true
     done
 
-    # 删除所有 Sandbox 和 SandboxPool
     kubectl delete sandbox --all --all-namespaces --force --grace-period=0 --ignore-not-found=true 2>/dev/null || true
     kubectl delete sandboxpool --all --all-namespaces --force --grace-period=0 --ignore-not-found=true 2>/dev/null || true
-
-    echo "✓ 测试资源清理完成"
 }
 
 # --- 2. 环境初始化 (构建与导入) ---
 function setup_env() {
-    local components=$1 # e.g. "controller agent janitor"
+    local components=$1 
     echo "=== [Setup] Building and Loading Images: $components ==="
-    cd "$ROOT_DIR"
+    
+    # 确保集群存在
+    ensure_cluster
 
-    # 预拉取基础镜像以防 InitContainer 失败
+    cd "$ROOT_DIR"
     docker pull alpine:latest >/dev/null 2>&1
     kind load docker-image alpine:latest --name "$CLUSTER_NAME" >/dev/null 2>&1
 
     for comp in $components; do
-        if [ -z "$SKIP_BUILD" ]; then
+        if [ "$SKIP_BUILD" != "true" ]; then
             make "docker-$comp"
         fi
+        echo "Loading image fast-sandbox/$comp:dev into $CLUSTER_NAME..."
         kind load docker-image "fast-sandbox/$comp:dev" --name "$CLUSTER_NAME"
     done
 }
 
-# --- 3. 部署基础架构 (CRD, RBAC, Controller) ---
+# --- 3. 部署基础架构 ---
 function install_infra() {
-    local force_refresh=$1  # 设置为 "true" 时强制重装 Controller
-
+    local force_refresh=$1
     echo "=== [Setup] Installing Infrastructure (CRDs, RBAC, Controller) ==="
     cd "$ROOT_DIR"
     
-    # 1. 安装 CRD 并等待其在 API Server 层面完全就绪
     kubectl apply -f config/crd/
     kubectl wait --for=condition=Established crd/sandboxes.sandbox.fast.io --timeout=30s
     kubectl wait --for=condition=Established crd/sandboxpools.sandbox.fast.io --timeout=30s
 
-    # 强制静默 5 秒，给 API Server 刷新 Discovery 缓存的时间
     echo "Waiting for OpenAPI schema synchronization..."
     sleep 5
-
     local count=0
     while ! kubectl get crd sandboxes.sandbox.fast.io -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties}' | grep -q "resetRevision"; do
-        if [ $count -gt 20 ]; then
-            echo "❌ Timeout waiting for CRD schema sync"
-            exit 1
-        fi
-        echo "Still waiting for resetRevision field to appear..."
+        if [ $count -gt 20 ]; then exit 1; fi
         sleep 2
         count=$((count+1))
     done
-    echo "Schema synced successfully."
 
-    # 2. 安装 RBAC 和 Controller
     kubectl apply -f config/rbac/base.yaml
-
-    # 如果强制刷新，先删除旧的 Controller
-    if [ "$force_refresh" = "true" ]; then
+    if [ "$force_refresh" = "true" ] || [ "$FORCE_RECREATE_CLUSTER" = "true" ]; then
         kubectl delete deployment fast-sandbox-controller --ignore-not-found=true 2>/dev/null || true
     fi
-
     kubectl apply -f config/manager/controller.yaml
-
     kubectl rollout status deployment/fast-sandbox-controller --timeout=60s
 }
 
-# --- 4. 部署 Janitor (强制刷新) ---
+# --- 4. 部署 Janitor ---
 function install_janitor() {
     echo "=== [Setup] Refreshing Node Janitor ==="
-    
-    # 先删除可能存在的旧实例（无论名字是 janitor-e2e 还是 fast-sandbox-janitor）
     kubectl delete ds -l app=fast-sandbox-janitor --ignore-not-found=true --force --grace-period=0
-    kubectl delete ds janitor-e2e --ignore-not-found=true --force --grace-period=0
-
+    
     cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: DaemonSet
@@ -135,110 +134,57 @@ function wait_for_pod() {
     local label=$1
     local timeout=${2:-120}
     local namespace=${3:-default}
-    echo "Waiting for pod with label $label in namespace $namespace to be ready..."
-    for i in $(seq 1 20); do
-        if kubectl get pod -l "$label" -n "$namespace" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null | grep -q "."; then
+    echo "Waiting for pod with label $label in namespace $namespace to exist..."
+    
+    # 阶段 1: 等待 Pod 对象在 API Server 中出现
+    local found=false
+    for i in $(seq 1 30); do
+        if kubectl get pod -l "$label" -n "$namespace" --no-headers 2>/dev/null | grep -q "."; then
+            found=true
             break
         fi
-        sleep 3
+        sleep 2
     done
+
+    if [ "$found" = "false" ]; then
+        echo "❌ FAILURE: Pod with label $label never appeared in namespace $namespace"
+        return 1
+    fi
+
+        # 阶段 2: 等待 Pod 达到 Ready 状态
+    echo "Pod appeared, waiting for Ready condition..."
     kubectl wait --for=condition=ready pod -l "$label" -n "$namespace" --timeout="${timeout}s"
+
+    # 关键点：给 Controller 的心跳同步留一点缓冲时间 (默认同步周期是 2s)
+    # 确保 Registry 已经感知到该 Agent
+    echo "Pod is Ready, waiting for Controller heartbeat sync..."
+    sleep 5
 }
 
-# --- 6. 完全清理 (包括基础设施，用于手动清理) ---
-function cleanup_all_infra() {
-    echo "=== [Cleanup] 清理所有基础设施 ==="
-
-    # 清理测试资源
-    cleanup_test_resources
-
-    # 删除 Controller
-    kubectl delete deployment fast-sandbox-controller --ignore-not-found=true 2>/dev/null || true
-
-    # 清理所有 Janitor 变体
-    kubectl delete ds -l app=fast-sandbox-janitor --ignore-not-found=true 2>/dev/null || true
-    kubectl delete ds fast-sandbox-janitor-e2e --ignore-not-found=true 2>/dev/null || true
-    kubectl delete ds janitor-e2e --ignore-not-found=true 2>/dev/null || true
-
-    # 删除 RBAC
-    kubectl delete clusterrolebinding fast-sandbox-manager-rolebinding --ignore-not-found=true 2>/dev/null || true
-    kubectl delete clusterrole fast-sandbox-manager-role --ignore-not-found=true 2>/dev/null || true
-    kubectl delete serviceaccount fast-sandbox-manager-role --ignore-not-found=true 2>/dev/null || true
-
-    # 删除 CRD
-    kubectl delete crd sandboxes.sandbox.fast.io --ignore-not-found=true 2>/dev/null || true
-    kubectl delete crd sandboxpools.sandbox.fast.io --ignore-not-found=true 2>/dev/null || true
-
-    echo "✓ 基础设施清理完成"
-}
-
-# --- 7. Case 测试辅助函数 ---
-
-# 断言相等
-assert_equals() {
-    local expected=$1
-    local actual=$2
-    local msg=${3:-"assertion failed"}
-
-    if [ "$expected" != "$actual" ]; then
-        echo "  ❌ $msg: expected='$expected', actual='$actual'"
-        return 1
+# --- 6. 环境清理 ---
+function cleanup_all() {
+    echo "=== [Teardown] Cleaning up all resources ==="
+    if [ "$FORCE_RECREATE_CLUSTER" = "true" ]; then
+        echo "跳过细粒度清理，环境由下次 ensure_cluster 重置。"
+        return
     fi
-    return 0
+    kubectl delete sandboxpool --all --force --grace-period=0 --ignore-not-found=true || true
+    kubectl delete sandbox --all --force --grace-period=0 --ignore-not-found=true || true
+    kubectl delete deployment fast-sandbox-controller --ignore-not-found=true || true
+    kubectl delete ds -l app=fast-sandbox-janitor --ignore-not-found=true --force --grace-period=0 || true
+    kubectl delete clusterrolebinding fast-sandbox-manager-rolebinding --ignore-not-found=true || true
+    kubectl delete clusterrole fast-sandbox-manager-role --ignore-not-found=true || true
+    kubectl delete serviceaccount fast-sandbox-manager-role --ignore-not-found=true || true
+    kubectl delete -f config/crd/ --ignore-not-found=true || true
 }
 
-# 断言包含
-assert_contains() {
-    local haystack=$1
-    local needle=$2
-    local msg=${3:-"assertion failed"}
-
-    if echo "$haystack" | grep -q "$needle"; then
-        return 0
-    fi
-    echo "  ❌ $msg: '$needle' not found in '$haystack'"
-    return 1
-}
-
-# 断言命令成功
-assert_success() {
-    local cmd=$1
-    local msg=${2:-"command failed"}
-
-    if eval "$cmd" > /dev/null 2>&1; then
-        return 0
-    fi
-    echo "  ❌ $msg: command '$cmd' failed"
-    return 1
-}
-
-# 断言命令失败
-assert_fails() {
-    local cmd=$1
-    local msg=${2:-"command should fail"}
-
-    if eval "$cmd" > /dev/null 2>&1; then
-        echo "  ❌ $msg: command '$cmd' should have failed"
-        return 1
-    fi
-    return 0
-}
-
-# 等待条件满足（带超时）
+# 辅助函数
 wait_for_condition() {
-    local condition=$1
-    local timeout=${2:-30}
-    local msg=${3:-"condition not met"}
-
+    local condition=$1; local timeout=${2:-30}; local msg=${3:-"condition not met"}
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
-        if eval "$condition"; then
-            return 0
-        fi
-        sleep 1
-        elapsed=$((elapsed + 1))
+        if eval "$condition"; then return 0; fi
+        sleep 1; elapsed=$((elapsed + 1))
     done
-
-    echo "  ❌ $msg: timeout after ${timeout}s"
-    return 1
+    echo "❌ $msg: timeout"; return 1
 }

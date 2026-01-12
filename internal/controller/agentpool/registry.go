@@ -235,37 +235,79 @@ func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
 }
 
 func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
+
 	var sbList apiv1alpha1.SandboxList
+
 	if err := c.List(ctx, &sbList); err != nil {
+
 		return err
+
 	}
+
+
 
 	r.mu.Lock()
+
 	defer r.mu.Unlock()
 
+
+
 	for _, sb := range sbList.Items {
+
 		if sb.Status.AssignedPod != "" {
+
 			id := AgentID(sb.Status.AssignedPod)
+
 			a, ok := r.agents[id]
+
 			if !ok {
+
 				a = AgentInfo{
-					ID:        id,
-					PodName:   string(id),
-					UsedPorts: make(map[int32]bool),
+
+					ID:				id,
+
+					PodName:		string(id),
+
+					UsedPorts:		make(map[int32]bool),
+
+					SandboxStatuses:	make(map[string]api.SandboxStatus),
+
+					LastHeartbeat:		time.Now(), // 给个初始时间
+
 				}
+
 			}
+
 			if a.UsedPorts == nil {
+
 				a.UsedPorts = make(map[int32]bool)
+
 			}
+
+			if a.SandboxStatuses == nil {
+
+				a.SandboxStatuses = make(map[string]api.SandboxStatus)
+
+			}
+
 			
+
 			a.Allocated++
+
 			for _, p := range sb.Spec.ExposedPorts {
+
 				a.UsedPorts[p] = true
+
 			}
+
 			r.agents[id] = a
+
 		}
+
 	}
+
 	return nil
+
 }
 
 func (r *InMemoryRegistry) Remove(id AgentID) {

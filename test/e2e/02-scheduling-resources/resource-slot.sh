@@ -44,7 +44,7 @@ EOF
     local count=0
     for i in $(seq 1 20); do
         LOGS=$(kubectl logs -l "fast-sandbox.io/pool=resource-test-pool" -n "$TEST_NS" --tail=100 2>/dev/null || echo "")
-        if echo "$LOGS" | grep -q "Slot allocated for sb-slot-check: CPU=1000m"; then
+        if echo "$LOGS" | grep -q "RESOURCES_VERIFY: Slot allocated for sb-slot-check: CPU=1000m"; then
             echo "  ✓ 插槽资源计算正确 (1000m CPU)"
 
             # 清理
