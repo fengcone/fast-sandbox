@@ -40,7 +40,7 @@ func (j *Janitor) doCleanup(ctx context.Context, task CleanupTask) error {
 	if err == nil {
 		logger.Info("Killing task")
 		t.Kill(ctx, syscall.SIGKILL)
-		
+
 		// 等待退出
 		exitCh, err := t.Wait(ctx)
 		if err == nil {

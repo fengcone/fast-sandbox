@@ -21,6 +21,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	FastPathService_CreateSandbox_FullMethodName = "/fastpath.v1.FastPathService/CreateSandbox"
 	FastPathService_DeleteSandbox_FullMethodName = "/fastpath.v1.FastPathService/DeleteSandbox"
+	FastPathService_ListSandboxes_FullMethodName = "/fastpath.v1.FastPathService/ListSandboxes"
+	FastPathService_GetSandbox_FullMethodName    = "/fastpath.v1.FastPathService/GetSandbox"
 )
 
 // FastPathServiceClient is the client API for FastPathService service.
@@ -31,6 +33,10 @@ type FastPathServiceClient interface {
 	CreateSandbox(ctx context.Context, in *CreateRequest, opts ...grpc.CallOption) (*CreateResponse, error)
 	// DeleteSandbox 极速删除沙箱
 	DeleteSandbox(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
+	// ListSandboxes 获取沙箱列表
+	ListSandboxes(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	// GetSandbox 获取沙箱详情
+	GetSandbox(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*SandboxInfo, error)
 }
 
 type fastPathServiceClient struct {
@@ -61,6 +67,26 @@ func (c *fastPathServiceClient) DeleteSandbox(ctx context.Context, in *DeleteReq
 	return out, nil
 }
 
+func (c *fastPathServiceClient) ListSandboxes(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListResponse)
+	err := c.cc.Invoke(ctx, FastPathService_ListSandboxes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *fastPathServiceClient) GetSandbox(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*SandboxInfo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxInfo)
+	err := c.cc.Invoke(ctx, FastPathService_GetSandbox_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FastPathServiceServer is the server API for FastPathService service.
 // All implementations must embed UnimplementedFastPathServiceServer
 // for forward compatibility.
@@ -69,6 +95,10 @@ type FastPathServiceServer interface {
 	CreateSandbox(context.Context, *CreateRequest) (*CreateResponse, error)
 	// DeleteSandbox 极速删除沙箱
 	DeleteSandbox(context.Context, *DeleteRequest) (*DeleteResponse, error)
+	// ListSandboxes 获取沙箱列表
+	ListSandboxes(context.Context, *ListRequest) (*ListResponse, error)
+	// GetSandbox 获取沙箱详情
+	GetSandbox(context.Context, *GetRequest) (*SandboxInfo, error)
 	mustEmbedUnimplementedFastPathServiceServer()
 }
 
@@ -84,6 +114,12 @@ func (UnimplementedFastPathServiceServer) CreateSandbox(context.Context, *Create
 }
 func (UnimplementedFastPathServiceServer) DeleteSandbox(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSandbox not implemented")
+}
+func (UnimplementedFastPathServiceServer) ListSandboxes(context.Context, *ListRequest) (*ListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSandboxes not implemented")
+}
+func (UnimplementedFastPathServiceServer) GetSandbox(context.Context, *GetRequest) (*SandboxInfo, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSandbox not implemented")
 }
 func (UnimplementedFastPathServiceServer) mustEmbedUnimplementedFastPathServiceServer() {}
 func (UnimplementedFastPathServiceServer) testEmbeddedByValue()                         {}
@@ -142,6 +178,42 @@ func _FastPathService_DeleteSandbox_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FastPathService_ListSandboxes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FastPathServiceServer).ListSandboxes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FastPathService_ListSandboxes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FastPathServiceServer).ListSandboxes(ctx, req.(*ListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FastPathService_GetSandbox_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FastPathServiceServer).GetSandbox(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FastPathService_GetSandbox_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FastPathServiceServer).GetSandbox(ctx, req.(*GetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FastPathService_ServiceDesc is the grpc.ServiceDesc for FastPathService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -156,6 +228,14 @@ var FastPathService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSandbox",
 			Handler:    _FastPathService_DeleteSandbox_Handler,
+		},
+		{
+			MethodName: "ListSandboxes",
+			Handler:    _FastPathService_ListSandboxes_Handler,
+		},
+		{
+			MethodName: "GetSandbox",
+			Handler:    _FastPathService_GetSandbox_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

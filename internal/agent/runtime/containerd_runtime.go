@@ -21,17 +21,17 @@ import (
 
 // ContainerdRuntime 实现基于 containerd 的容器运行时
 type ContainerdRuntime struct {
-	mu                sync.RWMutex
-	socketPath        string
-	client            *containerd.Client
-	sandboxes         map[string]*SandboxMetadata // sandboxID -> metadata
-	cgroupPath        string                      // Pod 的 cgroup 路径
-	netnsPath         string                      // Pod 的 network namespace 路径
-	agentID           string                      // Agent 名称 (Pod Name)
-	agentUID          string                      // Agent 唯一标识 (Pod UID)
-	agentNamespace    string                      // Agent 运行的命名空间
-	infraMgr          *infra.Manager              // 基础设施插件管理
-	allowedPluginPaths []string                   // 允许的插件路径白名单
+	mu                 sync.RWMutex
+	socketPath         string
+	client             *containerd.Client
+	sandboxes          map[string]*SandboxMetadata // sandboxID -> metadata
+	cgroupPath         string                      // Pod 的 cgroup 路径
+	netnsPath          string                      // Pod 的 network namespace 路径
+	agentID            string                      // Agent 名称 (Pod Name)
+	agentUID           string                      // Agent 唯一标识 (Pod UID)
+	agentNamespace     string                      // Agent 运行的命名空间
+	infraMgr           *infra.Manager              // 基础设施插件管理
+	allowedPluginPaths []string                    // 允许的插件路径白名单
 }
 
 const (
@@ -101,7 +101,9 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 
 func (r *ContainerdRuntime) discoverCgroupPath() error {
 	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "0::") {
@@ -118,7 +120,9 @@ func (r *ContainerdRuntime) discoverCgroupPath() error {
 }
 
 func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
-	if r.cgroupPath == "" { return fmt.Errorf("cgroup path is required") }
+	if r.cgroupPath == "" {
+		return fmt.Errorf("cgroup path is required")
+	}
 	var containerID string
 	if strings.Contains(r.cgroupPath, "cri-containerd-") {
 		parts := strings.Split(r.cgroupPath, "cri-containerd-")
@@ -135,9 +139,13 @@ func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
 
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	container, err := r.client.LoadContainer(ctx, containerID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	spec, err := container.Spec(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	for _, ns := range spec.Linux.Namespaces {
 		if ns.Type == specs.NetworkNamespace {
 			if ns.Path != "" {
@@ -160,7 +168,9 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 
 	image, err := r.prepareImage(ctx, config.Image)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	containerID := config.SandboxID
 	specOpts := r.prepareSpecOpts(config, image)
@@ -210,7 +220,9 @@ func (r *ContainerdRuntime) prepareImage(ctx context.Context, imageName string) 
 	image, err := r.client.GetImage(ctx, imageName)
 	if err != nil {
 		image, err = r.client.Pull(ctx, imageName, containerd.WithPullUnpack)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 	}
 	return image, nil
 }
@@ -318,7 +330,9 @@ func (r *ContainerdRuntime) calculateSlotResources() (int64, int64, error) {
 	capacityStr := os.Getenv("AGENT_CAPACITY")
 	var capacity int64 = 5
 	fmt.Sscanf(capacityStr, "%d", &capacity)
-	if capacity <= 0 { capacity = 1 }
+	if capacity <= 0 {
+		capacity = 1
+	}
 
 	cpuLimit := os.Getenv("CPU_LIMIT")
 	var totalCPU int64
@@ -331,7 +345,9 @@ func (r *ContainerdRuntime) calculateSlotResources() (int64, int64, error) {
 	}
 
 	totalMem := parseMemoryToBytes(os.Getenv("MEMORY_LIMIT"))
-	if totalCPU == 0 && totalMem == 0 { return 0, 0, fmt.Errorf("no limits") }
+	if totalCPU == 0 && totalMem == 0 {
+		return 0, 0, fmt.Errorf("no limits")
+	}
 	return totalCPU / capacity, totalMem / capacity, nil
 }
 
@@ -396,17 +412,23 @@ func (r *ContainerdRuntime) GetSandbox(ctx context.Context, sandboxID string) (*
 func (r *ContainerdRuntime) ListSandboxes(ctx context.Context) ([]*SandboxMetadata, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.client == nil { return nil, nil }
+	if r.client == nil {
+		return nil, nil
+	}
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	filter := fmt.Sprintf("labels.\"fast-sandbox.io/managed\"==\"true\",labels.\"fast-sandbox.io/agent-uid\"==\"%s\"", r.agentUID)
 	containers, err := r.client.Containers(ctx, filter)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	var list []*SandboxMetadata
 	for _, c := range containers {
 		info, _ := c.Info(ctx)
 		status := "unknown"
 		if task, err := c.Task(ctx, nil); err == nil {
-			if s, err := task.Status(ctx); err == nil { status = string(s.Status) }
+			if s, err := task.Status(ctx); err == nil {
+				status = string(s.Status)
+			}
 		}
 		list = append(list, &SandboxMetadata{
 			SandboxID:   info.Labels["fast-sandbox.io/id"],
@@ -424,27 +446,37 @@ func (r *ContainerdRuntime) ListSandboxes(ctx context.Context) ([]*SandboxMetada
 func (r *ContainerdRuntime) ListImages(ctx context.Context) ([]string, error) {
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	images, err := r.client.ListImages(ctx)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	var names []string
-	for _, img := range images { names = append(names, img.Name()) }
+	for _, img := range images {
+		names = append(names, img.Name())
+	}
 	return names, nil
 }
 
 func (r *ContainerdRuntime) PullImage(ctx context.Context, image string) error {
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	_, err := r.client.GetImage(ctx, image)
-	if err == nil { return nil }
+	if err == nil {
+		return nil
+	}
 	_, err = r.client.Pull(ctx, image, containerd.WithPullUnpack)
 	return err
 }
 
 func (r *ContainerdRuntime) Close() error {
-	if r.client != nil { return r.client.Close() }
+	if r.client != nil {
+		return r.client.Close()
+	}
 	return nil
 }
 
 func envMapToSlice(env map[string]string) []string {
 	var res []string
-	for k, v := range env { res = append(res, fmt.Sprintf("%s=%s", k, v)) }
+	for k, v := range env {
+		res = append(res, fmt.Sprintf("%s=%s", k, v))
+	}
 	return res
 }

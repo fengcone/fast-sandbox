@@ -84,9 +84,9 @@ func (j *Janitor) Scan(ctx context.Context) {
 		}
 
 		if shouldCleanup {
-			logger.Info("Found orphan container via CRD reconciliation", 
-				"container", c.ID(), 
-				"name", sandboxName, 
+			logger.Info("Found orphan container via CRD reconciliation",
+				"container", c.ID(),
+				"name", sandboxName,
 				"reason", reason)
 			j.queue.Add(CleanupTask{
 				ContainerID: c.ID(),
@@ -117,7 +117,7 @@ func (j *Janitor) podExists(uid string) bool {
 func (j *Janitor) enqueueOrphansByUID(ctx context.Context, uid string, name string, ns string) {
 	logger := log.FromContext(ctx)
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
-	
+
 	filter := fmt.Sprintf("labels.\"fast-sandbox.io/agent-uid\"==\"%s\"", uid)
 	containers, err := j.ctrdClient.Containers(ctx, filter)
 	if err != nil {

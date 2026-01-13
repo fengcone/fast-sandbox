@@ -41,7 +41,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil { return err }
+				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+					return err
+				}
 				controllerutil.RemoveFinalizer(latest, finalizerName)
 				return r.Update(ctx, latest)
 			})
@@ -53,7 +55,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &apiv1alpha1.Sandbox{}
-			if err := r.Get(ctx, req.NamespacedName, latest); err != nil { return err }
+			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+				return err
+			}
 			controllerutil.AddFinalizer(latest, finalizerName)
 			return r.Update(ctx, latest)
 		})
@@ -67,7 +71,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil { return err }
+				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+					return err
+				}
 				latest.Status.AssignedPod = ""
 				latest.Status.Phase = "Pending"
 				latest.Status.AcceptedResetRevision = sandbox.Spec.ResetRevision
@@ -85,7 +91,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !ok {
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &apiv1alpha1.Sandbox{}
-			if err := r.Get(ctx, req.NamespacedName, latest); err != nil { return err }
+			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+				return err
+			}
 			latest.Status.AssignedPod = ""
 			latest.Status.Phase = "Pending"
 			return r.Status().Update(ctx, latest)
@@ -100,7 +108,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil { return err }
+				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+					return err
+				}
 				latest.Status.Phase = "Bound"
 				return r.Status().Update(ctx, latest)
 			})
@@ -116,12 +126,18 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
 	agent, err := r.Registry.Allocate(sandbox)
-	if err != nil { return ctrl.Result{RequeueAfter: 5 * time.Second}, nil }
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
 
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &apiv1alpha1.Sandbox{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil { return err }
-		if latest.Status.AssignedPod != "" { return fmt.Errorf("race") }
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		if latest.Status.AssignedPod != "" {
+			return fmt.Errorf("race")
+		}
 		latest.Status.AssignedPod = agent.PodName
 		latest.Status.NodeName = agent.NodeName
 		latest.Status.Phase = "Pending"
@@ -136,17 +152,23 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 
 func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
 	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok { return nil }
+	if !ok {
+		return nil
+	}
 	if status, ok := agentInfo.SandboxStatuses[sandbox.Name]; ok {
 		if sandbox.Status.Phase != status.Phase || sandbox.Status.SandboxID != status.SandboxID {
 			return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil { return err }
+				if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+					return err
+				}
 				latest.Status.Phase = status.Phase
 				latest.Status.SandboxID = status.SandboxID
 				if len(latest.Spec.ExposedPorts) > 0 && agentInfo.PodIP != "" {
 					var ep []string
-					for _, p := range latest.Spec.ExposedPorts { ep = append(ep, fmt.Sprintf("%s:%d", agentInfo.PodIP, p)) }
+					for _, p := range latest.Spec.ExposedPorts {
+						ep = append(ep, fmt.Sprintf("%s:%d", agentInfo.PodIP, p))
+					}
 					latest.Status.Endpoints = ep
 				}
 				return r.Status().Update(ctx, latest)
@@ -158,7 +180,9 @@ func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbo
 
 func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
 	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok { return fmt.Errorf("no agent") }
+	if !ok {
+		return fmt.Errorf("no agent")
+	}
 	_, err := r.AgentClient.CreateSandbox(fmt.Sprintf("%s:8081", agentInfo.PodIP), &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{SandboxID: sandbox.Name, ClaimName: sandbox.Name, Image: sandbox.Spec.Image, Command: sandbox.Spec.Command, Args: sandbox.Spec.Args},
 	})
@@ -167,7 +191,9 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 
 func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
 	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok { return nil }
+	if !ok {
+		return nil
+	}
 	_, err := r.AgentClient.DeleteSandbox(fmt.Sprintf("%s:8081", agentInfo.PodIP), &api.DeleteSandboxRequest{SandboxID: sandbox.Name})
 	return err
 }
@@ -179,11 +205,15 @@ func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&apiv1alpha1.Sandbox{}).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []ctrl.Request {
 			pod := o.(*corev1.Pod)
-			if pod.Labels["app"] != "sandbox-agent" || pod.Status.Phase != corev1.PodRunning { return nil }
+			if pod.Labels["app"] != "sandbox-agent" || pod.Status.Phase != corev1.PodRunning {
+				return nil
+			}
 			var sbList apiv1alpha1.SandboxList
 			mgr.GetClient().List(ctx, &sbList, client.MatchingFields{"status.assignedPod": ""})
 			var reqs []ctrl.Request
-			for _, sb := range sbList.Items { reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&sb)}) }
+			for _, sb := range sbList.Items {
+				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&sb)})
+			}
 			return reqs
 		})).Complete(r)
 }

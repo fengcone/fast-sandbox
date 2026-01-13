@@ -17,12 +17,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	fastpathv1 "fast-sandbox/api/proto/v1"
+	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/controller"
 	"fast-sandbox/internal/controller/agentcontrol"
 	"fast-sandbox/internal/controller/agentpool"
 	"fast-sandbox/internal/controller/fastpath"
+
 	"google.golang.org/grpc"
 )
 
@@ -106,12 +107,12 @@ func main() {
 	}
 
 	fastpathv1.RegisterFastPathServiceServer(grpcServer, &fastpath.Server{
-		K8sClient:            mgr.GetClient(),
-		Registry:             reg,
-		AgentClient:          agentHTTPClient,
+		K8sClient:              mgr.GetClient(),
+		Registry:               reg,
+		AgentClient:            agentHTTPClient,
 		DefaultConsistencyMode: consistencyMode,
 	})
-	setupLog.Info("Starting Fast-Path gRPC server", "port", 9090, "consistency-mode", consistencyMode, "orphan-timeout", fastpathOrphanTimeout)
+	setupLog.Info("Starting Fast-Path gRPC server V2", "port", 9090, "consistency-mode", consistencyMode, "orphan-timeout", fastpathOrphanTimeout)
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
 			setupLog.Error(err, "failed to serve gRPC")
@@ -128,7 +129,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	
+
 	// 崩溃恢复：在启动 Manager 之后，异步执行一次性状态恢复
 	go func() {
 		// 等待缓存同步

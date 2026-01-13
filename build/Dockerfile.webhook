@@ -1,0 +1,14 @@
+# Build stage
+FROM golang:1.25-alpine AS builder
+WORKDIR /workspace
+COPY test/e2e/05-advanced-features/webhook/main.go .
+COPY test/e2e/05-advanced-features/webhook/go.mod .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o webhook-server main.go
+
+# Final stage
+FROM alpine:3.19
+WORKDIR /
+COPY --from=builder /workspace/webhook-server .
+# 安装证书工具
+RUN apk add --no-cache openssl
+ENTRYPOINT ["/webhook-server"]

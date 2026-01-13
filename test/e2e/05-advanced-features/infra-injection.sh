@@ -23,12 +23,13 @@ EOF
     wait_for_pod "fast-sandbox.io/pool=injection-pool" 60 "$TEST_NS"
 
     # 创建 Sandbox
-    echo "  创建 Sandbox..."
+    SB_NAME="sb-injected-$RANDOM"
+    echo "  创建 Sandbox ($SB_NAME)..."
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-injected
+  name: $SB_NAME
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
@@ -38,7 +39,7 @@ EOF
     echo "  等待 Sandbox 运行..."
     local count=0
     for i in $(seq 1 20); do
-        PHASE=$(kubectl get sandbox sb-injected -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        PHASE=$(kubectl get sandbox $SB_NAME -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
         PHASE_LOWER=$(echo "$PHASE" | tr '[:upper:]' '[:lower:]')
         if [ "$PHASE_LOWER" = "running" ]; then
             echo "  ✓ Sandbox 运行成功"
@@ -46,7 +47,7 @@ EOF
         fi
         if [ $i -eq 20 ]; then
             echo "  ❌ Sandbox 未进入运行状态，phase: $PHASE"
-            kubectl delete sandbox sb-injected -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+            kubectl delete sandbox $SB_NAME -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             kubectl delete sandboxpool injection-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             return 1
         fi
@@ -66,7 +67,7 @@ EOF
     fi
 
     # 清理
-    kubectl delete sandbox sb-injected -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandbox $SB_NAME -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandboxpool injection-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     return 0

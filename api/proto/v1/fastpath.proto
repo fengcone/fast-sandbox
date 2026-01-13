@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package fastpath.v1;
 
-option go_package = "fast-sandbox/api/v1;fastpathv1";
+option go_package = "fast-sandbox/api/proto/v1;fastpathv1";
 
 service FastPathService {
   // CreateSandbox 极速创建沙箱，绕过 K8s 控制面延迟
@@ -10,7 +10,39 @@ service FastPathService {
 
   // DeleteSandbox 极速删除沙箱
   rpc DeleteSandbox(DeleteRequest) returns (DeleteResponse);
+
+  // ListSandboxes 获取沙箱列表
+  rpc ListSandboxes(ListRequest) returns (ListResponse);
+
+  // GetSandbox 获取沙箱详情
+  rpc GetSandbox(GetRequest) returns (SandboxInfo);
 }
+
+// ... (保持现有消息定义不变)
+
+message ListRequest {
+  string namespace = 1;
+}
+
+message ListResponse {
+  repeated SandboxInfo items = 1;
+}
+
+message GetRequest {
+  string sandbox_id = 1;
+  string namespace = 2;
+}
+
+message SandboxInfo {
+  string sandbox_id = 1;
+  string phase = 2;
+  string agent_pod = 3;
+  repeated string endpoints = 4;
+  int64 created_at = 5;
+  string image = 6;
+  string pool_ref = 7;
+}
+
 
 // ConsistencyMode 定义创建 sandbox 的一致性模式
 enum ConsistencyMode {

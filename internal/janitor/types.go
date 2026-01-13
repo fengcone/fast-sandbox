@@ -28,10 +28,13 @@ type Janitor struct {
 	podLister listerv1.PodLister
 
 	// 用于防止并发清理同一个容器
+
 	cleaning sync.Map // containerID -> struct{}{}
 
-	scanInterval   time.Duration
-	OrphanTimeout  time.Duration // Fast 模式下的孤儿清理超时时间
+	ScanInterval time.Duration
+
+	OrphanTimeout time.Duration // Fast 模式下的孤儿清理超时时间
+
 }
 
 // CleanupTask 定义一个清理任务

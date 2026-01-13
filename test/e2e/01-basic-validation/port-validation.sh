@@ -23,11 +23,12 @@ EOF
     wait_for_pod "fast-sandbox.io/pool=port-validation-pool" 60 "$TEST_NS"
 
     # 测试1: 端口 0 应该被拒绝
+    SB_NAME_0="sb-port-invalid-0-$RANDOM"
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-port-invalid-0
+  name: $SB_NAME_0
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "60"]
@@ -36,45 +37,47 @@ spec:
 EOF
 
     sleep 5
-    PHASE=$(kubectl get sandbox sb-port-invalid-0 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-    ASSIGNED_POD=$(kubectl get sandbox sb-port-invalid-0 -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
+    PHASE=$(kubectl get sandbox $SB_NAME_0 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    ASSIGNED_POD=$(kubectl get sandbox $SB_NAME_0 -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
 
     if [ "$ASSIGNED_POD" != "" ]; then
         echo "  ❌ 端口 0 被错误接受"
-        kubectl delete sandbox sb-port-invalid-0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        kubectl delete sandbox $SB_NAME_0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
     echo "  ✓ 端口 0 被正确拒绝"
-    kubectl delete sandbox sb-port-invalid-0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandbox $SB_NAME_0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
-    # 测试2: 端口 1 应该成功
+    # 测试2: 端口 8081 应该成功
+    SB_NAME_1="sb-port-valid-1-$RANDOM"
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-port-valid-1
+  name: $SB_NAME_1
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "60"]
   poolRef: port-validation-pool
-  exposedPorts: [1]
+  exposedPorts: [8081]
 EOF
 
     sleep 10
-    PHASE=$(kubectl get sandbox sb-port-valid-1 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    PHASE=$(kubectl get sandbox $SB_NAME_1 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
     if [ "$PHASE" != "running" ] && [ "$PHASE" != "bound" ]; then
-        echo "  ❌ 端口 1 被错误拒绝"
+        echo "  ❌ 端口 8081 被错误拒绝，phase: $PHASE"
         return 1
     fi
-    echo "  ✓ 端口 1 被正确接受"
-    kubectl delete sandbox sb-port-valid-1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    echo "  ✓ 端口 8081 被正确接受"
+    kubectl delete sandbox $SB_NAME_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 测试3: 端口 65535 应该成功
+    SB_NAME_MAX="sb-port-valid-max-$RANDOM"
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-port-valid-max
+  name: $SB_NAME_MAX
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "60"]
@@ -83,20 +86,21 @@ spec:
 EOF
 
     sleep 10
-    PHASE=$(kubectl get sandbox sb-port-valid-max -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    PHASE=$(kubectl get sandbox $SB_NAME_MAX -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
     if [ "$PHASE" != "running" ] && [ "$PHASE" != "bound" ]; then
         echo "  ❌ 端口 65535 被错误拒绝"
         return 1
     fi
     echo "  ✓ 端口 65535 被正确接受"
-    kubectl delete sandbox sb-port-valid-max -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandbox $SB_NAME_MAX -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 测试4: 端口 65536 应该被拒绝
+    SB_NAME_OVER="sb-port-invalid-over-$RANDOM"
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-port-invalid-over
+  name: $SB_NAME_OVER
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "60"]
@@ -105,14 +109,14 @@ spec:
 EOF
 
     sleep 5
-    ASSIGNED_POD=$(kubectl get sandbox sb-port-invalid-over -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
+    ASSIGNED_POD=$(kubectl get sandbox $SB_NAME_OVER -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
     if [ "$ASSIGNED_POD" != "" ]; then
         echo "  ❌ 端口 65536 被错误接受"
-        kubectl delete sandbox sb-port-invalid-over -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        kubectl delete sandbox $SB_NAME_OVER -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
     echo "  ✓ 端口 65536 被正确拒绝"
-    kubectl delete sandbox sb-port-invalid-over -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandbox $SB_NAME_OVER -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 清理 Pool
     kubectl delete sandboxpool port-validation-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1

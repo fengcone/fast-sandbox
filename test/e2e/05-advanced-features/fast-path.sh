@@ -6,13 +6,14 @@ describe() {
 }
 
 run() {
-    CLIENT_BIN="$SCRIPT_DIR/scripts/fastpath-client"
+    CLIENT_BIN="$ROOT_DIR/bin/kubectl-fastsb"
     if [ ! -f "$CLIENT_BIN" ]; then
-        echo "  编译测试客户端..."
-        cd "$SCRIPT_DIR/client" && go build -o "$CLIENT_BIN" main.go && cd - >/dev/null
+        echo "  编译官方 CLI 工具..."
+        cd "$ROOT_DIR" && go build -o bin/kubectl-fastsb ./cmd/kubectl-fastsb && cd - >/dev/null
     fi
 
     CTRL_NS=$(kubectl get deployment fast-sandbox-controller -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "default")
+    IMAGE="docker.io/library/alpine:latest"
 
     # ========================================
     # Sub-case 1: Fast 模式 - 端口隔离验证
@@ -38,7 +39,7 @@ apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata: { name: sb-crd-a }
 spec:
-  image: docker.io/library/alpine:latest
+  image: $IMAGE
   command: ["/bin/sleep", "3600"]
   poolRef: $POOL_1
   exposedPorts: [8080]
@@ -50,14 +51,14 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Fast 模式) 创建 Sandbox B (端口 8081)..."
-    OUT=$("$CLIENT_BIN" --pool=$POOL_1 --port=8081 --namespace="$TEST_NS" 2>&1)
-    if echo "$OUT" | grep -q "SUCCESS"; then
-        SB_B=$(echo "$OUT" | grep "sandbox_id" | awk '{print $2}')
+    OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" 2>&1)
+    if echo "$OUT" | grep -q "successfully"; then
+        SB_B=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         echo "  ✓ Fast-Path 创建成功: $SB_B"
-        if kubectl get sandbox sb-crd-a -n "$TEST_NS" >/dev/null 2>&1; then
-            echo "  ✓ Sandbox A 仍然存在"
+        if "$CLIENT_BIN" list --namespace="$TEST_NS" | grep -q "$SB_B"; then
+            echo "  ✓ Sandbox 在 list 中显示"
         else
-            echo "  ❌ Sandbox A 丢失"; kill $PF_PID; return 1
+            echo "  ❌ Sandbox 未在 list 中显示"; kill $PF_PID; return 1
         fi
     else
         echo "  ❌ Fast-Path 调用失败: $OUT"; kill $PF_PID; return 1
@@ -89,10 +90,9 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Strong 模式) 创建 Sandbox..."
-    OUT=$("$CLIENT_BIN" --pool=$POOL_2 --mode=strong --namespace="$TEST_NS" 2>&1)
-    if echo "$OUT" | grep -q "SUCCESS"; then
-        SB_ID=$(echo "$OUT" | grep "sandbox_id" | awk '{print $2}')
-        # 增加短时间等待状态同步
+    OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" 2>&1)
+    if echo "$OUT" | grep -q "successfully"; then
+        SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         sleep 5
         PHASE=$(kubectl get sandbox "$SB_ID" -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
         if [ "$PHASE" = "Bound" ] || [ "$PHASE" = "running" ] || [ "$PHASE" = "Pending" ]; then
@@ -136,9 +136,9 @@ EOF
 
         ORPHAN_NAME="test-orphan-$(date +%s)"
         echo "  创建故意失败的沙箱: $ORPHAN_NAME"
-        OUT=$("$CLIENT_BIN" --pool=$POOL_3 --name="$ORPHAN_NAME" --namespace="$TEST_NS" 2>&1)
+        OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_3" --name="$ORPHAN_NAME" --namespace="$TEST_NS" 2>&1)
         
-        if echo "$OUT" | grep -q "SUCCESS"; then
+        if echo "$OUT" | grep -q "successfully"; then
             echo "  ✓ Fast-Path 调用成功 (正如预期)"
             NODE_NAME=$(kubectl get pod -l fast-sandbox.io/pool=$POOL_3 -n "$TEST_NS" -o jsonpath='{.items[0].spec.nodeName}')
             CONTAINER_ID=$(docker exec "$NODE_NAME" ctr -n k8s.io containers ls | grep "$ORPHAN_NAME" | awk '{print $1}')

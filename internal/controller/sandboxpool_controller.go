@@ -63,7 +63,7 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if maxPerPod <= 0 {
 		maxPerPod = 1
 	}
-	
+
 	// 总需求量 = 正在跑的 + 正在排队的 + 最小缓冲区
 	totalNeededSlots := activeCount + pendingCount + pool.Spec.Capacity.BufferMin
 	desiredPods := (totalNeededSlots + maxPerPod - 1) / maxPerPod

@@ -72,6 +72,238 @@ func (ConsistencyMode) EnumDescriptor() ([]byte, []int) {
 	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{0}
 }
 
+type ListRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRequest) Reset() {
+	*x = ListRequest{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRequest) ProtoMessage() {}
+
+func (x *ListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
+func (*ListRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ListRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+type ListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*SandboxInfo         `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListResponse) Reset() {
+	*x = ListResponse{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListResponse) ProtoMessage() {}
+
+func (x *ListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
+func (*ListResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListResponse) GetItems() []*SandboxInfo {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type GetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRequest) Reset() {
+	*x = GetRequest{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRequest) ProtoMessage() {}
+
+func (x *GetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
+func (*GetRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetRequest) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *GetRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+type SandboxInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	Phase         string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
+	AgentPod      string                 `protobuf:"bytes,3,opt,name=agent_pod,json=agentPod,proto3" json:"agent_pod,omitempty"`
+	Endpoints     []string               `protobuf:"bytes,4,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Image         string                 `protobuf:"bytes,6,opt,name=image,proto3" json:"image,omitempty"`
+	PoolRef       string                 `protobuf:"bytes,7,opt,name=pool_ref,json=poolRef,proto3" json:"pool_ref,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SandboxInfo) Reset() {
+	*x = SandboxInfo{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SandboxInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SandboxInfo) ProtoMessage() {}
+
+func (x *SandboxInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SandboxInfo.ProtoReflect.Descriptor instead.
+func (*SandboxInfo) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SandboxInfo) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *SandboxInfo) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *SandboxInfo) GetAgentPod() string {
+	if x != nil {
+		return x.AgentPod
+	}
+	return ""
+}
+
+func (x *SandboxInfo) GetEndpoints() []string {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
+func (x *SandboxInfo) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *SandboxInfo) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+func (x *SandboxInfo) GetPoolRef() string {
+	if x != nil {
+		return x.PoolRef
+	}
+	return ""
+}
+
 type CreateRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Image           string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
@@ -88,7 +320,7 @@ type CreateRequest struct {
 
 func (x *CreateRequest) Reset() {
 	*x = CreateRequest{}
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[0]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -100,7 +332,7 @@ func (x *CreateRequest) String() string {
 func (*CreateRequest) ProtoMessage() {}
 
 func (x *CreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[0]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -113,7 +345,7 @@ func (x *CreateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateRequest.ProtoReflect.Descriptor instead.
 func (*CreateRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{0}
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateRequest) GetImage() string {
@@ -183,7 +415,7 @@ type CreateResponse struct {
 
 func (x *CreateResponse) Reset() {
 	*x = CreateResponse{}
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[1]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +427,7 @@ func (x *CreateResponse) String() string {
 func (*CreateResponse) ProtoMessage() {}
 
 func (x *CreateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[1]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +440,7 @@ func (x *CreateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateResponse.ProtoReflect.Descriptor instead.
 func (*CreateResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{1}
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CreateResponse) GetSandboxId() string {
@@ -242,7 +474,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[2]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -254,7 +486,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[2]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -267,7 +499,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeleteRequest) GetSandboxId() string {
@@ -293,7 +525,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[3]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +537,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_v1_fastpath_proto_msgTypes[3]
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +550,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeleteResponse) GetSuccess() bool {
@@ -332,7 +564,26 @@ var File_api_proto_v1_fastpath_proto protoreflect.FileDescriptor
 
 const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\n" +
-	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"\x8e\x02\n" +
+	"\x1bapi/proto/v1/fastpath.proto\x12\vfastpath.v1\"+\n" +
+	"\vListRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\">\n" +
+	"\fListResponse\x12.\n" +
+	"\x05items\x18\x01 \x03(\v2\x18.fastpath.v1.SandboxInfoR\x05items\"I\n" +
+	"\n" +
+	"GetRequest\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"\xcd\x01\n" +
+	"\vSandboxInfo\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x14\n" +
+	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x1b\n" +
+	"\tagent_pod\x18\x03 \x01(\tR\bagentPod\x12\x1c\n" +
+	"\tendpoints\x18\x04 \x03(\tR\tendpoints\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\x12\x14\n" +
+	"\x05image\x18\x06 \x01(\tR\x05image\x12\x19\n" +
+	"\bpool_ref\x18\a \x01(\tR\apoolRef\"\x8e\x02\n" +
 	"\rCreateRequest\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x19\n" +
 	"\bpool_ref\x18\x02 \x01(\tR\apoolRef\x12#\n" +
@@ -356,10 +607,13 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\x0fConsistencyMode\x12\b\n" +
 	"\x04FAST\x10\x00\x12\n" +
 	"\n" +
-	"\x06STRONG\x10\x012\xa5\x01\n" +
+	"\x06STRONG\x10\x012\xac\x02\n" +
 	"\x0fFastPathService\x12H\n" +
 	"\rCreateSandbox\x12\x1a.fastpath.v1.CreateRequest\x1a\x1b.fastpath.v1.CreateResponse\x12H\n" +
-	"\rDeleteSandbox\x12\x1a.fastpath.v1.DeleteRequest\x1a\x1b.fastpath.v1.DeleteResponseB Z\x1efast-sandbox/api/v1;fastpathv1b\x06proto3"
+	"\rDeleteSandbox\x12\x1a.fastpath.v1.DeleteRequest\x1a\x1b.fastpath.v1.DeleteResponse\x12D\n" +
+	"\rListSandboxes\x12\x18.fastpath.v1.ListRequest\x1a\x19.fastpath.v1.ListResponse\x12?\n" +
+	"\n" +
+	"GetSandbox\x12\x17.fastpath.v1.GetRequest\x1a\x18.fastpath.v1.SandboxInfoB&Z$fast-sandbox/api/proto/v1;fastpathv1b\x06proto3"
 
 var (
 	file_api_proto_v1_fastpath_proto_rawDescOnce sync.Once
@@ -374,25 +628,34 @@ func file_api_proto_v1_fastpath_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_v1_fastpath_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_api_proto_v1_fastpath_proto_goTypes = []any{
 	(ConsistencyMode)(0),   // 0: fastpath.v1.ConsistencyMode
-	(*CreateRequest)(nil),  // 1: fastpath.v1.CreateRequest
-	(*CreateResponse)(nil), // 2: fastpath.v1.CreateResponse
-	(*DeleteRequest)(nil),  // 3: fastpath.v1.DeleteRequest
-	(*DeleteResponse)(nil), // 4: fastpath.v1.DeleteResponse
+	(*ListRequest)(nil),    // 1: fastpath.v1.ListRequest
+	(*ListResponse)(nil),   // 2: fastpath.v1.ListResponse
+	(*GetRequest)(nil),     // 3: fastpath.v1.GetRequest
+	(*SandboxInfo)(nil),    // 4: fastpath.v1.SandboxInfo
+	(*CreateRequest)(nil),  // 5: fastpath.v1.CreateRequest
+	(*CreateResponse)(nil), // 6: fastpath.v1.CreateResponse
+	(*DeleteRequest)(nil),  // 7: fastpath.v1.DeleteRequest
+	(*DeleteResponse)(nil), // 8: fastpath.v1.DeleteResponse
 }
 var file_api_proto_v1_fastpath_proto_depIdxs = []int32{
-	0, // 0: fastpath.v1.CreateRequest.consistency_mode:type_name -> fastpath.v1.ConsistencyMode
-	1, // 1: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
-	3, // 2: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
-	2, // 3: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
-	4, // 4: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	4, // 0: fastpath.v1.ListResponse.items:type_name -> fastpath.v1.SandboxInfo
+	0, // 1: fastpath.v1.CreateRequest.consistency_mode:type_name -> fastpath.v1.ConsistencyMode
+	5, // 2: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
+	7, // 3: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
+	1, // 4: fastpath.v1.FastPathService.ListSandboxes:input_type -> fastpath.v1.ListRequest
+	3, // 5: fastpath.v1.FastPathService.GetSandbox:input_type -> fastpath.v1.GetRequest
+	6, // 6: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
+	8, // 7: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
+	2, // 8: fastpath.v1.FastPathService.ListSandboxes:output_type -> fastpath.v1.ListResponse
+	4, // 9: fastpath.v1.FastPathService.GetSandbox:output_type -> fastpath.v1.SandboxInfo
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_v1_fastpath_proto_init() }
@@ -406,7 +669,7 @@ func file_api_proto_v1_fastpath_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_v1_fastpath_proto_rawDesc), len(file_api_proto_v1_fastpath_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

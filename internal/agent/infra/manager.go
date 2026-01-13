@@ -39,7 +39,7 @@ func NewManager(podPath string) *Manager {
 // discoverHostPath 构造 K8s 容器运行时可见的真实物理路径
 func (m *Manager) discoverHostPath() {
 
-podUID := os.Getenv("POD_UID")
+	podUID := os.Getenv("POD_UID")
 	if podUID == "" {
 		fmt.Printf("Warning: POD_UID not set, infra injection might fail\n")
 		return

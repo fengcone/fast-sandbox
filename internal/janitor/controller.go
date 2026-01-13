@@ -22,7 +22,7 @@ func NewJanitor(kubeClient kubernetes.Interface, ctrdClient *containerd.Client, 
 		ctrdClient:   ctrdClient,
 		nodeName:     nodeName,
 		queue:        workqueue.NewNamedRateLimitingQueue(workqueue.DefaultItemBasedRateLimiter(), "janitor"),
-		scanInterval: 2 * time.Minute,
+		ScanInterval: 2 * time.Minute, // 默认值
 	}
 }
 
@@ -35,7 +35,7 @@ func (j *Janitor) Run(ctx context.Context) error {
 		informers.WithTweakListOptions(func(opts *metav1.ListOptions) {
 			opts.FieldSelector = "spec.nodeName=" + j.nodeName
 		}))
-	
+
 	podInformer := factory.Core().V1().Pods()
 	j.podLister = podInformer.Lister()
 
@@ -66,9 +66,8 @@ func (j *Janitor) Run(ctx context.Context) error {
 	go wait.UntilWithContext(ctx, j.runWorker, time.Second)
 
 	// 3. 启动定时扫描
-	ticker := time.NewTicker(j.scanInterval)
+	ticker := time.NewTicker(j.ScanInterval)
 	defer ticker.Stop()
-
 	// 初始扫描
 	j.Scan(ctx)
 

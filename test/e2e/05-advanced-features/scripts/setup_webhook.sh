@@ -7,26 +7,21 @@ set -e
 
 # 预期命名空间：强制隔离，不使用 TEST_NS
 WEBHOOK_NS="e2e-webhook-isolated"
+CLUSTER_NAME=${CLUSTER_NAME:-"fast-sandbox"}
 
 echo "=== 部署 ValidatingWebhook 用于孤儿测试 ==="
 
 # 1. 创建命名空间
 kubectl create namespace "$WEBHOOK_NS" 2>/dev/null || true
 
-# 2. 编译 webhook server (使用静态编译)
-SCRIPT_DIR_HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "编译 webhook server..."
-cd "$SCRIPT_DIR_HOOK/../webhook"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o webhook-server main.go
-if [ ! -f webhook-server ]; then
-    echo "❌ 编译失败，请检查 Go 环境"
-    exit 1
-fi
+# 2. 构建并加载 Webhook 镜像
+echo "构建 Webhook 镜像..."
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+docker build -t fast-sandbox/webhook:test -f "$ROOT_DIR/build/Dockerfile.webhook" "$ROOT_DIR"
+echo "加载镜像到 KIND..."
+kind load docker-image fast-sandbox/webhook:test --name "$CLUSTER_NAME"
 
-# 3. 创建包含 webhook 二进制的 ConfigMap
-kubectl create configmap webhook-binary --from-file=webhook-server -n "$WEBHOOK_NS" --dry-run=client -o yaml | kubectl apply -f -
-
-# 4. 使用自签名证书创建 TLS Secret
+# 3. 使用自签名证书创建 TLS Secret
 # 生成 CA 和服务器证书
 openssl req -x509 -newkey rsa:2048 -keyout ca.key -out ca.crt -days 1 -nodes -subj "/CN=webhook-ca" 2>/dev/null
 cat > csr.conf <<EOF
@@ -53,7 +48,7 @@ openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out s
 # 创建 TLS Secret
 kubectl create secret tls webhook-tls --cert=server.crt --key=server.key -n "$WEBHOOK_NS" --dry-run=client -o yaml | kubectl apply -f -
 
-# 5. 创建 webhook deployment
+# 4. 创建 webhook deployment
 cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
@@ -72,40 +67,30 @@ spec:
     spec:
       containers:
       - name: webhook
-        image: alpine:latest
-        command: ["/bin/sh", "-c"]
+        image: fast-sandbox/webhook:test
+        imagePullPolicy: IfNotPresent
+        command: ["/webhook-server"]
         args:
           - |
-            # 从 ConfigMap 复制二进制文件
-            cp /config/webhook-server /tmp/webhook-server
-            chmod +x /tmp/webhook-server
-            # 复制证书
-            cp /certs/tls.crt /tmp/server.crt
-            cp /certs/tls.key /tmp/server.key
+            # 证书已通过 Secret 挂载
             # 启动 webhook
-            /tmp/webhook-server
+            /webhook-server
         env:
         - name: PORT
           value: "443"
         - name: REJECT_PATTERN
           value: "test-orphan-"
         volumeMounts:
-        - name: webhook-binary
-          mountPath: /config
         - name: certs
           mountPath: /certs
           readOnly: true
       volumes:
-      - name: webhook-binary
-        configMap:
-          name: webhook-binary
-          defaultMode: 0555
       - name: certs
         secret:
           secretName: webhook-tls
 EOF
 
-# 6. 创建 Service
+# 5. 创建 Service
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Service
@@ -121,14 +106,14 @@ spec:
     app: sandbox-webhook
 EOF
 
-# 7. 等待 webhook Pod 就绪
+# 6. 等待 webhook Pod 就绪
 echo "等待 webhook Pod 就绪..."
 kubectl wait --for=condition=ready pod -l app=sandbox-webhook -n "$WEBHOOK_NS" --timeout=60s
 
-# 8. 获取 CA Bundle
+# 7. 获取 CA Bundle
 CA_BUNDLE=$(cat ca.crt | base64 | tr -d '\n')
 
-# 9. 创建 ValidatingWebhookConfiguration
+# 8. 创建 ValidatingWebhookConfiguration
 cat <<EOF | kubectl apply -f -
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -157,7 +142,7 @@ webhooks:
 EOF
 
 # 清理临时文件
-rm -f ca.key ca.crt ca.srl server.key server.csr server.crt csr.conf webhook-server
+rm -f ca.key ca.crt ca.srl server.key server.csr server.crt csr.conf
 
 echo "✓ ValidatingWebhook 部署完成"
 echo ""

@@ -45,16 +45,22 @@ spec:
 EOF
 
     sleep 10
-    echo "  等待过期（30 秒）..."
-    sleep 30
+    echo "  等待过期并被删除 (最多等待 60s)..."
+    local deleted=false
+    for i in $(seq 1 12); do
+        if ! kubectl get sandbox test-expiry -n "$TEST_NS" >/dev/null 2>&1; then
+            deleted=true
+            break
+        fi
+        echo "  检查 $i: Sandbox 仍存在..."
+        sleep 5
+    done
 
-    # 验证 Sandbox 已被自动删除
-    if ! kubectl get sandbox test-expiry -n "$TEST_NS" >/dev/null 2>&1; then
+    if [ "$deleted" = "true" ]; then
         echo "  ✓ Sandbox 已被自动垃圾回收"
     else
         echo "  ❌ 过期后 Sandbox 仍然存在"
         kubectl delete sandbox test-expiry -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
-        kubectl delete sandboxpool expiry-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
 
