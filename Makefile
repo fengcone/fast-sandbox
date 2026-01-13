@@ -23,7 +23,7 @@ help:
 	@echo "  make docker-controller      - build controller image"
 	@echo "  make docker-janitor         - build janitor image"
 
-build: build-controller build-agent build-janitor
+build: build-controller build-agent build-janitor build-fsb-ctl
 
 build-controller:
 	$(GO) build $(GOFLAGS) -o bin/controller ./cmd/controller
@@ -33,6 +33,9 @@ build-agent:
 
 build-janitor:
 	$(GO) build $(GOFLAGS) -o bin/janitor ./cmd/janitor
+
+build-fsb-ctl:
+	$(GO) build $(GOFLAGS) -o bin/fsb-ctl ./cmd/fsb-ctl
 
 # Cross-compile for linux/amd64 (for docker images)
 build-agent-linux:
@@ -46,6 +49,10 @@ build-controller-linux:
 build-janitor-linux:
 	@mkdir -p bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/janitor ./cmd/janitor
+
+build-fsb-ctl-linux:
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/fsb-ctl ./cmd/fsb-ctl
 
 test:
 	$(GO) test $(GOFLAGS) ./...

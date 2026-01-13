@@ -1,0 +1,16 @@
+apiVersion: sandbox.fast.io/v1alpha1
+kind: SandboxPool
+metadata:
+  name: default-pool
+  namespace: default
+spec:
+  agentTemplate:
+    spec:
+      containers:
+      - image: fast-sandbox/agent:dev
+        name: agent
+  capacity:
+    poolMax: 1
+    poolMin: 1
+  maxSandboxesPerPod: 5
+  runtimeType: container

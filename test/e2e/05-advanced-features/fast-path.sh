@@ -6,10 +6,10 @@ describe() {
 }
 
 run() {
-    CLIENT_BIN="$ROOT_DIR/bin/kubectl-fastsb"
+    CLIENT_BIN="$ROOT_DIR/bin/fsb-ctl"
     if [ ! -f "$CLIENT_BIN" ]; then
         echo "  编译官方 CLI 工具..."
-        cd "$ROOT_DIR" && go build -o bin/kubectl-fastsb ./cmd/kubectl-fastsb && cd - >/dev/null
+        cd "$ROOT_DIR" && go build -o bin/fsb-ctl ./cmd/fsb-ctl && cd - >/dev/null
     fi
 
     CTRL_NS=$(kubectl get deployment fast-sandbox-controller -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "default")
@@ -23,7 +23,8 @@ run() {
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: SandboxPool
-metadata: { name: $POOL_1 }
+metadata:
+  name: $POOL_1
 spec:
   capacity: { poolMin: 1, poolMax: 1 }
   maxSandboxesPerPod: 5
@@ -39,7 +40,7 @@ apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata: { name: sb-crd-a }
 spec:
-  image: $IMAGE
+  image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
   poolRef: $POOL_1
   exposedPorts: [8080]
@@ -51,14 +52,23 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Fast 模式) 创建 Sandbox B (端口 8081)..."
-    OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" 2>&1)
+    # 使用新参数 --name
+    OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
         SB_B=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         echo "  ✓ Fast-Path 创建成功: $SB_B"
+        
+        # 验证 List 功能
         if "$CLIENT_BIN" list --namespace="$TEST_NS" | grep -q "$SB_B"; then
             echo "  ✓ Sandbox 在 list 中显示"
         else
             echo "  ❌ Sandbox 未在 list 中显示"; kill $PF_PID; return 1
+        fi
+
+        if kubectl get sandbox sb-crd-a -n "$TEST_NS" >/dev/null 2>&1; then
+            echo "  ✓ Sandbox A 仍然存在"
+        else
+            echo "  ❌ Sandbox A 丢失"; kill $PF_PID; return 1
         fi
     else
         echo "  ❌ Fast-Path 调用失败: $OUT"; kill $PF_PID; return 1
@@ -90,7 +100,7 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Strong 模式) 创建 Sandbox..."
-    OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" 2>&1)
+    OUT=$("$CLIENT_BIN" run "sb-strong-$RANDOM" --image="$IMAGE" --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
         SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         sleep 5
@@ -136,7 +146,8 @@ EOF
 
         ORPHAN_NAME="test-orphan-$(date +%s)"
         echo "  创建故意失败的沙箱: $ORPHAN_NAME"
-        OUT=$("$CLIENT_BIN" run $IMAGE --pool="$POOL_3" --name="$ORPHAN_NAME" --namespace="$TEST_NS" 2>&1)
+        # 使用 --name 指定特定名称
+        OUT=$("$CLIENT_BIN" run "$ORPHAN_NAME" --image="$IMAGE" --pool="$POOL_3" --namespace="$TEST_NS" 2>&1)
         
         if echo "$OUT" | grep -q "successfully"; then
             echo "  ✓ Fast-Path 调用成功 (正如预期)"

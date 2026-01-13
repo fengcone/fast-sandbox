@@ -11,8 +11,9 @@ setup_suite() {
     cleanup_test_resources "$TEST_NS"
     echo "=== [Setup] 初始化测试环境 ==="
     kubectl create namespace "$TEST_NS" 2>/dev/null || true
-    setup_env "controller agent"
+    setup_env "controller agent janitor"
     install_infra
+    install_janitor
 }
 
 run_test_suite "$SCRIPT_DIR" "$1" "setup_suite"

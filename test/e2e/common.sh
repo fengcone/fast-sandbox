@@ -123,7 +123,7 @@ spec:
       - name: janitor
         image: $JANITOR_IMAGE
         imagePullPolicy: IfNotPresent
-        command: ["/janitor"]
+        command: ["/workspace/janitor"]
         args: ["--scan-interval=10s", "--orphan-timeout=10s"]
         securityContext: { privileged: true }
         env: [{ name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }]
@@ -132,7 +132,7 @@ spec:
         - { name: fifo, mountPath: /run/containerd/fifo }
       volumes:
       - { name: sock, hostPath: { path: /run/containerd/containerd.sock, type: Socket } }
-      - { name: fifo, hostPath: { path: /run/containerd/fifo, type: Directory } }
+      - { name: fifo, hostPath: { path: /run/containerd/fifo, type: DirectoryOrCreate } }
 EOF
     kubectl rollout status daemonset/fast-sandbox-janitor-e2e --timeout=60s
 }
