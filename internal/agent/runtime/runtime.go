@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"io"
 )
 
 // SandboxMetadata 包含 sandbox 容器的元数据
@@ -49,11 +50,13 @@ type Runtime interface {
 	// 返回创建的 sandbox 元数据
 	CreateSandbox(ctx context.Context, config *SandboxConfig) (*SandboxMetadata, error)
 
-	// DeleteSandbox 停止并删除一个 sandbox 容器
+	// DeleteSandbox 删除一个 sandbox 容器
 	DeleteSandbox(ctx context.Context, sandboxID string) error
 
-	// GetSandbox 获取指定 sandbox 的元数据
-	// 如果不存在返回 nil, nil
+	// GetSandboxLogs 获取沙箱日志
+	GetSandboxLogs(ctx context.Context, sandboxID string, follow bool, stdout io.Writer) error
+
+	// GetSandbox 获取沙箱信息
 	GetSandbox(ctx context.Context, sandboxID string) (*SandboxMetadata, error)
 
 	// ListSandboxes 列出所有当前运行的 sandbox

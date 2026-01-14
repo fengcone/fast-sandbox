@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,8 +190,25 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *SandboxCo
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
-	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
+	// 准备日志文件
+	logDir := "/var/log/fast-sandbox"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log dir: %w", err)
+	}
+	logPath := filepath.Join(logDir, fmt.Sprintf("%s.log", containerID))
+
+	// 打开日志文件 (追加模式)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+	// 注意：Task 结束时 containerd 会关闭流，但我们需要确保这里的 handle 不泄露
+	// 使用 cio.NewCreator 接管流
+
+	// 使用 WithStreams 重定向 stdout/stderr
+	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStreams(nil, logFile, logFile)))
+	if err != nil {
+		logFile.Close() // 创建失败需手动关闭
 		// 清理容器和快照
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to create task: %w", err)
@@ -467,11 +486,142 @@ func (r *ContainerdRuntime) PullImage(ctx context.Context, image string) error {
 }
 
 func (r *ContainerdRuntime) Close() error {
-	if r.client != nil {
-		return r.client.Close()
-	}
+
+	if r.client != nil { return r.client.Close() }
+
 	return nil
+
 }
+
+
+
+// GetSandboxLogs 读取沙箱日志
+
+func (r *ContainerdRuntime) GetSandboxLogs(ctx context.Context, sandboxID string, follow bool, stdout io.Writer) error {
+
+	logPath := filepath.Join("/var/log/fast-sandbox", fmt.Sprintf("%s.log", sandboxID))
+
+	
+
+	file, err := os.Open(logPath)
+
+	if err != nil {
+
+		if os.IsNotExist(err) {
+
+			return fmt.Errorf("log file not found")
+
+		}
+
+		return err
+
+	}
+
+	defer file.Close()
+
+
+
+	reader := bufio.NewReader(file)
+
+	
+
+	// 读取现有内容
+
+	for {
+
+		line, err := reader.ReadString('\n')
+
+		if line != "" {
+
+			if _, wErr := stdout.Write([]byte(line)); wErr != nil {
+
+				return wErr
+
+			}
+
+		}
+
+		if err != nil {
+
+			if err == io.EOF {
+
+				break
+
+			}
+
+			return err
+
+		}
+
+	}
+
+
+
+	if !follow {
+
+		return nil
+
+	}
+
+
+
+	// Follow 模式：轮询新内容
+
+	// 注意：更高效的做法是用 fsnotify，但轮询简单且依赖少
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+
+	defer ticker.Stop()
+
+
+
+	for {
+
+		select {
+
+		case <-ctx.Done():
+
+			return nil
+
+		case <-ticker.C:
+
+			for {
+
+				line, err := reader.ReadString('\n')
+
+				if line != "" {
+
+					if _, wErr := stdout.Write([]byte(line)); wErr != nil {
+
+						return wErr
+
+					}
+
+				}
+
+				if err == io.EOF {
+
+					break
+
+				}
+
+				if err != nil {
+
+					return err
+
+				}
+
+			}
+
+			// 检查文件是否被截断或删除（可选，暂略）
+
+		}
+
+	}
+
+}
+
+
 
 func envMapToSlice(env map[string]string) []string {
 	var res []string

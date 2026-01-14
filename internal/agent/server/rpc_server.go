@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -30,9 +31,58 @@ func (s *AgentServer) Start() error {
 	mux.HandleFunc("/api/v1/agent/create", s.handleCreate)
 	mux.HandleFunc("/api/v1/agent/delete", s.handleDelete)
 	mux.HandleFunc("/api/v1/agent/status", s.handleStatus)
+	mux.HandleFunc("/api/v1/agent/logs", s.handleLogs)
 
 	log.Printf("Starting agent HTTP server on %s\n", s.addr)
 	return http.ListenAndServe(s.addr, mux)
+}
+
+// handleLogs streams sandbox logs.
+func (s *AgentServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sandboxID := r.URL.Query().Get("sandboxId")
+	if sandboxID == "" {
+		http.Error(w, "sandboxId is required", http.StatusBadRequest)
+		return
+	}
+	follow := r.URL.Query().Get("follow") == "true"
+
+	// 支持流式输出
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Transfer-Encoding", "chunked")
+
+	// 使用 FlushWriter 包装 ResponseWriter，确保每写一行都 Flush
+	fw := &flushWriter{w: w}
+	if f, ok := w.(http.Flusher); ok {
+		fw.f = f
+	}
+
+	if err := s.sandboxManager.GetLogs(r.Context(), sandboxID, follow, fw); err != nil {
+		// 如果已经写过 Header，这里的 Error 可能客户端收不到，只能记录日志
+		log.Printf("GetLogs failed: %v", err)
+		return
+	}
+}
+
+type flushWriter struct {
+	w io.Writer
+	f http.Flusher
+}
+
+func (fw *flushWriter) Write(p []byte) (n int, err error) {
+	n, err = fw.w.Write(p)
+	if fw.f != nil {
+		fw.f.Flush()
+	}
+	return
 }
 
 // handleCreate handles create sandbox requests.

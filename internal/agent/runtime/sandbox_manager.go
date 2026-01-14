@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -120,6 +121,12 @@ func (m *SandboxManager) DeleteSandbox(ctx context.Context, sandboxID string) (*
 	return &api.DeleteSandboxResponse{
 		Success: true,
 	}, nil
+}
+
+// GetLogs 获取沙箱日志
+func (m *SandboxManager) GetLogs(ctx context.Context, sandboxID string, follow bool, w io.Writer) error {
+	// 不加锁，因为日志读取是长耗时操作
+	return m.runtime.GetSandboxLogs(ctx, sandboxID, follow, w)
 }
 
 // GetSandbox 获取指定 sandbox 的元数据
