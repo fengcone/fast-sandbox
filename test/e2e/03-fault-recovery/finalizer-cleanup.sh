@@ -44,13 +44,13 @@ spec:
   exposedPorts: [8080]
 EOF
 
-    sleep 10
-    PHASE_A=$(kubectl get sandbox sb-finalizer-a -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-    PHASE_A_LOWER=$(echo "$PHASE_A" | tr '[:upper:]' '[:lower:]')
-    if [ "$PHASE_A_LOWER" != "running" ] && [ "$PHASE_A_LOWER" != "bound" ]; then
-        echo "  ❌ Sandbox A 未运行，phase: $PHASE_A"
+    # 等待 Sandbox A 运行
+    if ! wait_for_condition "kubectl get sandbox sb-finalizer-a -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox A running"; then
+        echo "  ❌ Sandbox A 未运行"
         return 1
     fi
+
+    PHASE_A=$(kubectl get sandbox sb-finalizer-a -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
     echo "  Sandbox A Phase: $PHASE_A"
 
     # 验证 finalizer 存在
@@ -69,18 +69,11 @@ EOF
 
     # 等待删除完成
     echo "  等待 Sandbox 删除完成..."
-    local count=0
-    for i in $(seq 1 30); do
-        if ! kubectl get sandbox sb-finalizer-a -n "$TEST_NS" >/dev/null 2>&1; then
-            echo "  ✓ Sandbox 删除成功"
-            break
-        fi
-        if [ $i -eq 30 ]; then
-            echo "  ❌ Sandbox 删除超时"
-            return 1
-        fi
-        sleep 2
-    done
+    if ! wait_for_condition "! kubectl get sandbox sb-finalizer-a -n '$TEST_NS' >/dev/null 2>&1" 60 "Sandbox A deleted"; then
+        echo "  ❌ Sandbox 删除超时"
+        return 1
+    fi
+    echo "  ✓ Sandbox 删除成功"
 
     # 创建第二个 Sandbox 验证插槽已释放
     echo "  创建 Sandbox B 验证插槽已释放..."
@@ -96,12 +89,16 @@ spec:
   exposedPorts: [8081]
 EOF
 
-    sleep 10
+    # 等待 Sandbox B 运行
+    if ! wait_for_condition "kubectl get sandbox sb-finalizer-b -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox B running"; then
+        echo "  ❌ Sandbox B 未运行"
+        return 1
+    fi
+
     PHASE_B=$(kubectl get sandbox sb-finalizer-b -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
     ASSIGNED_POD_B=$(kubectl get sandbox sb-finalizer-b -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
 
-    PHASE_B_LOWER=$(echo "$PHASE_B" | tr '[:upper:]' '[:lower:]')
-    if [ "$PHASE_B_LOWER" != "running" ] && [ "$PHASE_B_LOWER" != "bound" ]; then
+    if [ -z "$PHASE_B" ] || [[ ! "$PHASE_B" =~ [Rr]unning|[Bb]ound ]]; then
         echo "  ❌ Sandbox B 未运行，phase: $PHASE_B"
         return 1
     fi

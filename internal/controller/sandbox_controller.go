@@ -32,6 +32,24 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Check if sandbox has expired
+	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
+		if time.Now().After(sandbox.Spec.ExpireTime.Time) {
+			// Sandbox has expired, delete it
+			if err := r.Delete(ctx, &sandbox); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete expired sandbox: %w", err)
+			}
+			// Return without requeue since the sandbox is being deleted
+			return ctrl.Result{}, nil
+		}
+		// Not expired yet, requeue after the remaining time
+		remainingTime := time.Until(sandbox.Spec.ExpireTime.Time)
+		if remainingTime > 0 && remainingTime < 30*time.Second {
+			// Requeue before expiration to check again
+			return ctrl.Result{RequeueAfter: remainingTime}, nil
+		}
+	}
+
 	finalizerName := "sandbox.fast.io/cleanup"
 	if sandbox.ObjectMeta.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
@@ -89,19 +107,35 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
 	if !ok {
-		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			latest := &apiv1alpha1.Sandbox{}
-			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-				return err
-			}
-			latest.Status.AssignedPod = ""
-			latest.Status.Phase = "Pending"
-			return r.Status().Update(ctx, latest)
-		})
-		return ctrl.Result{Requeue: true}, err
+		// Agent 不存在（被删除或心跳超时清理）
+		// 根据 failurePolicy 决定是否重新调度
+		if sandbox.Spec.FailurePolicy == apiv1alpha1.FailurePolicyAutoRecreate {
+			// AutoRecreate 模式：立即清空 assignedPod 触发重新调度
+			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &apiv1alpha1.Sandbox{}
+				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+					return err
+				}
+				// 只有在 assignedPod 没有变化时才执行（避免竞争）
+				if latest.Status.AssignedPod == sandbox.Status.AssignedPod {
+					latest.Status.AssignedPod = ""
+					latest.Status.Phase = "Pending"
+					latest.Status.SandboxID = ""
+					return r.Status().Update(ctx, latest)
+				}
+				return nil
+			})
+			return ctrl.Result{Requeue: true}, err
+		}
+		// Manual 模式：保持当前状态，不自动重新调度
+		// 只是等待用户手动干预（更新 resetRevision）
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	if time.Since(agent.LastHeartbeat) < 10*time.Second {
+	// 检查心跳超时
+	heartbeatAge := time.Since(agent.LastHeartbeat)
+	if heartbeatAge < 10*time.Second {
+		// 心跳正常
 		if sandbox.Status.Phase == "Pending" || sandbox.Status.Phase == "" {
 			if err := r.handleCreateOnAgent(ctx, &sandbox); err != nil {
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -119,8 +153,11 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	// 心跳超时但 Agent 仍在 Registry 中（Agent 进程可能挂了但 Pod 还在）
+	// 等待 AgentControlLoop 的 CleanupStaleAgents（5分钟）清理后触发 AutoRecreate
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 

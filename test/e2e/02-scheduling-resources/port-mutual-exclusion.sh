@@ -28,10 +28,16 @@ EOF
     for i in $(seq 1 30); do
         COUNT=$(kubectl get pods -l "fast-sandbox.io/pool=port-test-pool" -n "$TEST_NS" --no-headers 2>/dev/null | wc -l | tr -d ' ')
         if [ "$COUNT" -ge 2 ]; then
+            echo "  ✓ 2 个 Agent Pod 就绪"
             break
         fi
         sleep 2
     done
+
+    if [ "$COUNT" -lt 2 ]; then
+        echo "  ❌ Agent Pod 就绪超时，当前数量: $COUNT"
+        return 1
+    fi
 
     # 创建 Sandbox A，使用端口 8080
     echo "  调度 Sandbox A (端口 8080)..."
@@ -47,7 +53,12 @@ spec:
   exposedPorts: [8080]
 EOF
 
-    sleep 10
+    # 等待 Sandbox A 分配完成
+    if ! wait_for_condition "kubectl get sandbox sb-port-a -n '$TEST_NS' -o jsonpath='{.status.assignedPod}' 2>/dev/null | grep -q '.'" 30 "Sandbox A assigned"; then
+        echo "  ❌ Sandbox A 分配超时"
+        return 1
+    fi
+
     POD_A=$(kubectl get sandbox sb-port-a -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
     if [ -z "$POD_A" ]; then
         echo "  ❌ Sandbox A 分配失败"
@@ -70,15 +81,12 @@ spec:
 EOF
 
     echo "  等待 Sandbox B 调度完成..."
-    local count=0
-    for i in $(seq 1 20); do
-        POD_B=$(kubectl get sandbox sb-port-b -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
-        if [ -n "$POD_B" ]; then
-            break
-        fi
-        sleep 5
-    done
+    if ! wait_for_condition "kubectl get sandbox sb-port-b -n '$TEST_NS' -o jsonpath='{.status.assignedPod}' 2>/dev/null | grep -q '.'" 60 "Sandbox B assigned"; then
+        echo "  ❌ Sandbox B 分配超时"
+        return 1
+    fi
 
+    POD_B=$(kubectl get sandbox sb-port-b -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
     if [ -z "$POD_B" ]; then
         echo "  ❌ Sandbox B 分配失败"
         return 1
@@ -95,7 +103,7 @@ EOF
     # 检查 Endpoint 状态
     ENDPOINT_A=$(kubectl get sandbox sb-port-a -n "$TEST_NS" -o jsonpath='{.status.endpoints[0]}' 2>/dev/null || echo "")
     if [[ "$ENDPOINT_A" == *":8080" ]]; then
-        echo "  ✓ Endpoint 状态正确填充"
+        echo "  ✓ Endpoint 状态正确填充: $ENDPOINT_A"
     else
         echo "  ⚠ Endpoint 状态: $ENDPOINT_A"
     fi

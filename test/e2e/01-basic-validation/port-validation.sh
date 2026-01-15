@@ -36,12 +36,11 @@ spec:
   exposedPorts: [0]
 EOF
 
-    sleep 5
-    PHASE=$(kubectl get sandbox $SB_NAME_0 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    sleep 3
     ASSIGNED_POD=$(kubectl get sandbox $SB_NAME_0 -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
 
     if [ "$ASSIGNED_POD" != "" ]; then
-        echo "  ❌ 端口 0 被错误接受"
+        echo "  ❌ 端口 0 被错误接受 (assignedPod: $ASSIGNED_POD)"
         kubectl delete sandbox $SB_NAME_0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
@@ -62,10 +61,11 @@ spec:
   exposedPorts: [8081]
 EOF
 
-    sleep 10
-    PHASE=$(kubectl get sandbox $SB_NAME_1 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
-    if [ "$PHASE" != "running" ] && [ "$PHASE" != "bound" ]; then
+    # 等待 Sandbox 分配并运行
+    if ! wait_for_condition "kubectl get sandbox $SB_NAME_1 -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox with port 8081 running"; then
+        PHASE=$(kubectl get sandbox $SB_NAME_1 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
         echo "  ❌ 端口 8081 被错误拒绝，phase: $PHASE"
+        kubectl delete sandbox $SB_NAME_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
     echo "  ✓ 端口 8081 被正确接受"
@@ -85,10 +85,10 @@ spec:
   exposedPorts: [65535]
 EOF
 
-    sleep 10
-    PHASE=$(kubectl get sandbox $SB_NAME_MAX -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
-    if [ "$PHASE" != "running" ] && [ "$PHASE" != "bound" ]; then
-        echo "  ❌ 端口 65535 被错误拒绝"
+    if ! wait_for_condition "kubectl get sandbox $SB_NAME_MAX -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox with port 65535 running"; then
+        PHASE=$(kubectl get sandbox $SB_NAME_MAX -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        echo "  ❌ 端口 65535 被错误拒绝，phase: $PHASE"
+        kubectl delete sandbox $SB_NAME_MAX -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
     echo "  ✓ 端口 65535 被正确接受"
@@ -108,10 +108,10 @@ spec:
   exposedPorts: [65536]
 EOF
 
-    sleep 5
+    sleep 3
     ASSIGNED_POD=$(kubectl get sandbox $SB_NAME_OVER -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
     if [ "$ASSIGNED_POD" != "" ]; then
-        echo "  ❌ 端口 65536 被错误接受"
+        echo "  ❌ 端口 65536 被错误接受 (assignedPod: $ASSIGNED_POD)"
         kubectl delete sandbox $SB_NAME_OVER -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi

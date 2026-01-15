@@ -76,8 +76,7 @@ var logsCmd = &cobra.Command{
 		go func() {
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt)
-			<-
-sigCh
+			<-sigCh
 			resp.Body.Close()
 			os.Exit(0)
 		}()
@@ -116,14 +115,14 @@ func startPortForward(podName, namespace string) (int, *exec.Cmd, error) {
 		return 0, nil, err
 	}
 
-	// 等待端口就绪
-	for i := 0; i < 20; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 500*time.Millisecond)
+	// 等待端口就绪 (最多等待 5s)
+	for i := 0; i < 50; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			return port, cmd, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	cmd.Process.Kill()

@@ -52,8 +52,8 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Fast 模式) 创建 Sandbox B (端口 8081)..."
-    # 使用新参数 --name
-    OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" 2>&1)
+    # 使用新参数 --name，添加默认命令 /bin/sleep 3600
+    OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
         SB_B=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         echo "  ✓ Fast-Path 创建成功: $SB_B"
@@ -100,7 +100,7 @@ EOF
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
     echo "  通过 Fast-Path (Strong 模式) 创建 Sandbox..."
-    OUT=$("$CLIENT_BIN" run "sb-strong-$RANDOM" --image="$IMAGE" --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" 2>&1)
+    OUT=$("$CLIENT_BIN" run "sb-strong-$RANDOM" --image="$IMAGE" --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
         SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         sleep 5
@@ -146,8 +146,8 @@ EOF
 
         ORPHAN_NAME="test-orphan-$(date +%s)"
         echo "  创建故意失败的沙箱: $ORPHAN_NAME"
-        # 使用 --name 指定特定名称
-        OUT=$("$CLIENT_BIN" run "$ORPHAN_NAME" --image="$IMAGE" --pool="$POOL_3" --namespace="$TEST_NS" 2>&1)
+        # 使用 --name 指定特定名称，添加默认命令
+        OUT=$("$CLIENT_BIN" run "$ORPHAN_NAME" --image="$IMAGE" --pool="$POOL_3" --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
         
         if echo "$OUT" | grep -q "successfully"; then
             echo "  ✓ Fast-Path 调用成功 (正如预期)"

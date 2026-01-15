@@ -4,6 +4,10 @@ describe() {
     echo "Janitor 孤儿回收 - 验证 Janitor 检测并清理逻辑丢失的孤儿容器"
 }
 
+# Janitor 配置参数 (需与 install_janitor 中的配置保持一致)
+JANITOR_SCAN_INTERVAL=10s
+JANITOR_ORPHAN_TIMEOUT=10s
+
 run() {
     # 创建测试 Pool
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
@@ -35,10 +39,9 @@ spec:
   poolRef: orphan-test-pool
 EOF
 
-    sleep 15
-    PHASE=$(kubectl get sandbox sb-orphan -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null | tr '[:upper:]' '[:lower:]')
-    if [ "$PHASE" != "running" ] && [ "$PHASE" != "bound" ]; then
-        echo "  ❌ Sandbox 未运行，phase: $PHASE"
+    # 等待 Sandbox 运行
+    if ! wait_for_condition "kubectl get sandbox sb-orphan -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox running"; then
+        echo "  ❌ Sandbox 未运行"
         return 1
     fi
 
@@ -55,21 +58,26 @@ EOF
     kubectl patch sandbox sb-orphan -n "$TEST_NS" -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1
     kubectl delete sandbox sb-orphan -n "$TEST_NS" --wait=false >/dev/null 2>&1
 
-    echo "  等待 Janitor 调和检测（约 70 秒，超过 60s 保护窗口）..."
-    # 等待超过 Janitor 的 60s 保护窗口
-    local found=1
-    for i in $(seq 1 10); do
-        # 检查 Sandbox CR 是否已消失
+    # 等待 CRD 被删除
+    echo "  等待 CRD 删除..."
+    for i in {1..20}; do
         if ! kubectl get sandbox sb-orphan -n "$TEST_NS" >/dev/null 2>&1; then
-            # 容器应该仍然存在
-            echo "  CRD 已删除，等待 Janitor 清理孤儿容器..."
-            sleep 5
+            echo "  ✓ CRD 已删除"
+            break
         fi
-        sleep 2
+        sleep 1
     done
 
-    # 再等待一段时间确保 Janitor 扫描完成
-    sleep 50
+    # 计算需要等待的时间：scan-interval + orphan-timeout + 缓冲时间
+    # 这里等待约 30 秒，超过 Janitor 的 20s (10s scan + 10s timeout) 保护窗口
+    WAIT_TIME=30
+    echo "  等待 Janitor 扫描并清理孤儿容器 (约 ${WAIT_TIME}s，超过 scan-interval + orphan-timeout)..."
+
+    for i in $(seq 1 $((WAIT_TIME / 5))); do
+        sleep 5
+        echo -n "."
+    done
+    echo ""
 
     # 验证：由于我们只是模拟孤儿场景，容器应该仍存在（Janitor 需要更多时间扫描）
     # 在实际测试中，这可能需要更长时间

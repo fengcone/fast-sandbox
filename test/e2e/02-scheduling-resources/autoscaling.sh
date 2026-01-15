@@ -46,11 +46,22 @@ spec:
 EOF
 
     echo "  等待 Pool 扩容到 2 个 Pod..."
-    local count=0
-    for i in $(seq 1 30); do
+    local expanded=false
+    for i in $(seq 1 40); do
         COUNT=$(kubectl get pods -l "fast-sandbox.io/pool=scale-pool" -n "$TEST_NS" --no-headers 2>/dev/null | wc -l | tr -d ' ')
         if [ "$COUNT" -ge 2 ]; then
             echo "  ✓ Pool 成功扩容到 2 个 Pod"
+
+            # 验证两个 Sandbox 都分配成功
+            SB1_ASSIGNED=$(kubectl get sandbox sb-scale-1 -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
+            SB2_ASSIGNED=$(kubectl get sandbox sb-scale-2 -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
+
+            if [ -n "$SB1_ASSIGNED" ] && [ -n "$SB2_ASSIGNED" ]; then
+                echo "  ✓ 两个 Sandbox 都成功分配"
+                if [ "$SB1_ASSIGNED" != "$SB2_ASSIGNED" ]; then
+                    echo "  ✓ Sandbox 分配到不同的 Pod (互斥验证)"
+                fi
+            fi
 
             # 清理
             kubectl delete sandbox sb-scale-1 sb-scale-2 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
@@ -61,5 +72,8 @@ EOF
     done
 
     echo "  ❌ Pool 扩容失败，当前 Pod 数量: $COUNT"
+    # 清理
+    kubectl delete sandbox sb-scale-1 sb-scale-2 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandboxpool scale-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     return 1
 }
