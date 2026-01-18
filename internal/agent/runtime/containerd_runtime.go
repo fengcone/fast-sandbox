@@ -409,15 +409,30 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	container, err := r.client.LoadContainer(ctx, sandboxID)
 	if err != nil {
+		// 容器不存在，仍需尝试清理快照
 		delete(r.sandboxes, sandboxID)
+		// 直接删除快照
+		snapshotName := sandboxID + "-snapshot"
+		if err := r.client.SnapshotService("k8s.io").Remove(ctx, snapshotName); err != nil {
+			// 快照不存在或已被删除，忽略错误
+			fmt.Printf("Snapshot cleanup for %s: %v\n", snapshotName, err)
+		}
 		return nil
 	}
+
+	// 停止并删除任务
 	task, err := container.Task(ctx, nil)
 	if err == nil {
-		task.Kill(ctx, syscall.SIGKILL)
-		task.Delete(ctx)
+		// 先发送 SIGKILL 停止任务
+		_ = task.Kill(ctx, syscall.SIGKILL)
+		// 等待任务退出并删除（使用 WithProcessKill 确保进程被终止）
+		_, _ = task.Delete(ctx, containerd.WithProcessKill)
 	}
-	container.Delete(ctx, containerd.WithSnapshotCleanup)
+
+	// 删除容器及其快照
+	if err := container.Delete(ctx, containerd.WithSnapshotCleanup); err != nil {
+		fmt.Printf("Container delete error for %s: %v\n", sandboxID, err)
+	}
 	delete(r.sandboxes, sandboxID)
 	return nil
 }
@@ -486,142 +501,84 @@ func (r *ContainerdRuntime) PullImage(ctx context.Context, image string) error {
 }
 
 func (r *ContainerdRuntime) Close() error {
-
-	if r.client != nil { return r.client.Close() }
-
+	if r.client != nil {
+		return r.client.Close()
+	}
 	return nil
-
 }
-
-
 
 // GetSandboxLogs 读取沙箱日志
 
 func (r *ContainerdRuntime) GetSandboxLogs(ctx context.Context, sandboxID string, follow bool, stdout io.Writer) error {
-
 	logPath := filepath.Join("/var/log/fast-sandbox", fmt.Sprintf("%s.log", sandboxID))
-
-	
-
 	file, err := os.Open(logPath)
-
 	if err != nil {
-
 		if os.IsNotExist(err) {
 
 			return fmt.Errorf("log file not found")
 
 		}
-
 		return err
-
 	}
-
 	defer file.Close()
-
-
-
 	reader := bufio.NewReader(file)
-
-	
-
 	// 读取现有内容
-
 	for {
-
 		line, err := reader.ReadString('\n')
-
 		if line != "" {
-
 			if _, wErr := stdout.Write([]byte(line)); wErr != nil {
 
 				return wErr
 
 			}
-
 		}
-
 		if err != nil {
-
 			if err == io.EOF {
 
 				break
 
 			}
-
 			return err
-
 		}
-
 	}
-
-
-
 	if !follow {
 
 		return nil
 
 	}
-
-
-
 	// Follow 模式：轮询新内容
-
 	// 注意：更高效的做法是用 fsnotify，但轮询简单且依赖少
-
 	ticker := time.NewTicker(500 * time.Millisecond)
-
 	defer ticker.Stop()
-
-
-
 	for {
-
 		select {
-
 		case <-ctx.Done():
-
 			return nil
-
 		case <-ticker.C:
-
 			for {
-
 				line, err := reader.ReadString('\n')
-
 				if line != "" {
-
 					if _, wErr := stdout.Write([]byte(line)); wErr != nil {
 
 						return wErr
 
 					}
-
 				}
-
 				if err == io.EOF {
 
 					break
 
 				}
-
 				if err != nil {
 
 					return err
 
 				}
-
 			}
-
 			// 检查文件是否被截断或删除（可选，暂略）
-
 		}
-
 	}
-
 }
-
-
 
 func envMapToSlice(env map[string]string) []string {
 	var res []string

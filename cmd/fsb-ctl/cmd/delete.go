@@ -6,6 +6,7 @@ import (
 	"log"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -35,4 +36,3 @@ var deleteCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(deleteCmd)
 }
-

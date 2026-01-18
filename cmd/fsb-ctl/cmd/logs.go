@@ -25,7 +25,7 @@ var logsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
-		
+
 		// 1. 获取 Sandbox 信息以找到 Agent
 		client, conn := getClient()
 		if conn != nil {
@@ -47,7 +47,7 @@ var logsCmd = &cobra.Command{
 		// 2. 建立连接通道
 		// 尝试直连 Agent IP (集群内或扁平网络)
 		// 但通常外网无法访问 Pod IP。我们采用 port-forward 策略作为兜底。
-		
+
 		localPort, pfCmd, err := startPortForward(info.AgentPod, viper.GetString("namespace"))
 		if err != nil {
 			log.Fatalf("Failed to start port-forward: %v", err)
@@ -110,7 +110,7 @@ func startPortForward(podName, namespace string) (int, *exec.Cmd, error) {
 	cmd := exec.Command("kubectl", "port-forward", fmt.Sprintf("pod/%s", podName), fmt.Sprintf("%d:8081", port), "-n", namespace)
 	cmd.Stdout = os.Stdout // Debug usage
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Start(); err != nil {
 		return 0, nil, err
 	}

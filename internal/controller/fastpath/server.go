@@ -3,7 +3,6 @@ package fastpath
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
@@ -17,8 +16,7 @@ import (
 )
 
 const (
-	maxRetries             = 3
-	defaultConsistencyMode = api.ConsistencyModeFast
+	maxRetries = 3
 )
 
 type Server struct {
@@ -27,26 +25,12 @@ type Server struct {
 	Registry               agentpool.AgentRegistry
 	AgentClient            *api.AgentClient
 	DefaultConsistencyMode api.ConsistencyMode
-	pendingCreations       map[string]*pendingCreation
-	pendingCreationsMu     sync.RWMutex
 }
 
 // 强制编译时检查接口实现情况
 var _ fastpathv1.FastPathServiceServer = &Server{}
 
-type pendingCreation struct {
-	agentID    agentpool.AgentID
-	sandbox    *apiv1alpha1.Sandbox
-	cancelFunc context.CancelFunc
-}
-
 func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
-	s.pendingCreationsMu.Lock()
-	if s.pendingCreations == nil {
-		s.pendingCreations = make(map[string]*pendingCreation)
-	}
-	s.pendingCreationsMu.Unlock()
-
 	mode := s.DefaultConsistencyMode
 	if req.ConsistencyMode == fastpathv1.ConsistencyMode_STRONG {
 		mode = api.ConsistencyModeStrong
@@ -69,9 +53,6 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 			Command:      req.Command,
 			Args:         req.Args,
 		},
-	}
-	if tempSB.Namespace == "" {
-		tempSB.Namespace = "default"
 	}
 
 	agent, err := s.Registry.Allocate(tempSB)
@@ -165,10 +146,6 @@ func (s *Server) getEndpoints(ip string, sb *apiv1alpha1.Sandbox) []string {
 
 func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest) (*fastpathv1.ListResponse, error) {
 	namespace := req.Namespace
-	if namespace == "" {
-		namespace = "default"
-	}
-
 	// 1. 从 K8s 获取已有的 CRD
 	var sbList apiv1alpha1.SandboxList
 	if err := s.K8sClient.List(ctx, &sbList, client.InNamespace(namespace)); err != nil {
@@ -195,10 +172,6 @@ func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest)
 
 func (s *Server) GetSandbox(ctx context.Context, req *fastpathv1.GetRequest) (*fastpathv1.SandboxInfo, error) {
 	namespace := req.Namespace
-	if namespace == "" {
-		namespace = "default"
-	}
-
 	var sb apiv1alpha1.Sandbox
 	if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: namespace}, &sb); err != nil {
 		return nil, err
@@ -217,9 +190,6 @@ func (s *Server) GetSandbox(ctx context.Context, req *fastpathv1.GetRequest) (*f
 
 func (s *Server) DeleteSandbox(ctx context.Context, req *fastpathv1.DeleteRequest) (*fastpathv1.DeleteResponse, error) {
 	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
-	}
 	sb := &apiv1alpha1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: req.SandboxId, Namespace: ns}}
 	if err := s.K8sClient.Delete(ctx, sb); err != nil {
 		return &fastpathv1.DeleteResponse{Success: false}, err

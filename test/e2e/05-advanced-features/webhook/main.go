@@ -12,28 +12,28 @@ import (
 
 // AdmissionReview 标准的 Kubernetes AdmissionReview 结构
 type AdmissionReview struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Request    *AdmissionRequest `json:"request,omitempty"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Request    *AdmissionRequest  `json:"request,omitempty"`
 	Response   *AdmissionResponse `json:"response,omitempty"`
 }
 
 // AdmissionRequest 准入请求
 type AdmissionRequest struct {
-	UID                string `json:"uid"`
-	Kind               Kind   `json:"kind"`
-	Resource           Resource `json:"resource"`
-	SubResource        string `json:"subResource,omitempty"`
-	RequestKind        *Kind  `json:"requestKind,omitempty"`
-	RequestResource    *Resource `json:"requestResource,omitempty"`
-	Name               string `json:"name"`
-	Namespace          string `json:"namespace"`
-	Operation          string `json:"operation"`
-	UserInfo           UserInfo `json:"userInfo"`
-	Object             json.RawMessage `json:"object,omitempty"`
-	OldObject          json.RawMessage `json:"oldObject,omitempty"`
-	DryRun             bool `json:"dryRun"`
-	Options            json.RawMessage `json:"options,omitempty"`
+	UID             string          `json:"uid"`
+	Kind            Kind            `json:"kind"`
+	Resource        Resource        `json:"resource"`
+	SubResource     string          `json:"subResource,omitempty"`
+	RequestKind     *Kind           `json:"requestKind,omitempty"`
+	RequestResource *Resource       `json:"requestResource,omitempty"`
+	Name            string          `json:"name"`
+	Namespace       string          `json:"namespace"`
+	Operation       string          `json:"operation"`
+	UserInfo        UserInfo        `json:"userInfo"`
+	Object          json.RawMessage `json:"object,omitempty"`
+	OldObject       json.RawMessage `json:"oldObject,omitempty"`
+	DryRun          bool            `json:"dryRun"`
+	Options         json.RawMessage `json:"options,omitempty"`
 }
 
 type Kind struct {
@@ -53,8 +53,8 @@ type UserInfo struct {
 
 // AdmissionResponse 准入响应
 type AdmissionResponse struct {
-	UID     string `json:"uid"`
-	Allowed bool `json:"allowed"`
+	UID     string           `json:"uid"`
+	Allowed bool             `json:"allowed"`
 	Result  *AdmissionResult `json:"result,omitempty"`
 }
 
@@ -104,7 +104,7 @@ func handleAdmission(w http.ResponseWriter, r *http.Request, rejectPattern strin
 
 	// 准备响应
 	response := &AdmissionResponse{
-		UID: review.Request.UID,
+		UID:     review.Request.UID,
 		Allowed: true,
 	}
 

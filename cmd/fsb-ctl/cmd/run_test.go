@@ -63,7 +63,7 @@ func TestRunCommand(t *testing.T) {
 
 	// 构造命令: run my-sandbox --image=alpine --pool=test-pool
 	rootCmd.SetArgs([]string{"run", "my-sandbox", "--image=alpine", "--pool=test-pool", "--mode=strong"})
-	
+
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -106,7 +106,7 @@ consistency_mode: fast
 	// 重置
 	pool = ""
 	image = ""
-	
+
 	// 执行: run my-sandbox -f config.yaml --pool=override-pool
 	rootCmd.SetArgs([]string{"run", "my-sandbox", "-f", tmpFile.Name(), "--pool=override-pool"})
 	if err := rootCmd.Execute(); err != nil {

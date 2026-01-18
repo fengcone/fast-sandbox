@@ -8,6 +8,7 @@ spec:
     spec:
       containers:
       - image: fast-sandbox/agent:dev
+        imagePullPolicy: IfNotPresent
         name: agent
   capacity:
     poolMax: 1
