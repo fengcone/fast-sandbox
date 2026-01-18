@@ -32,8 +32,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if sandbox has expired
-	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
+	// Check if sandbox has expired (only if not being deleted)
+	// 如果有 deletionTimestamp，优先处理 finalizer，跳过过期检查
+	if sandbox.ObjectMeta.DeletionTimestamp == nil && sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
 		if time.Now().After(sandbox.Spec.ExpireTime.Time) {
 			// Sandbox has expired - soft delete: remove runtime but keep CRD for history
 			if sandbox.Status.Phase != "Expired" {
