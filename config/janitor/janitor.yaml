@@ -21,10 +21,26 @@ spec:
       - name: janitor
         image: fast-sandbox/janitor:dev
         imagePullPolicy: IfNotPresent
-        args:
-        - --scan-interval=2m
+        command: ["/workspace/janitor"]
+        args: ["--scan-interval=2m"]
+        securityContext:
+          privileged: true
         env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        volumeMounts:
+        - name: sock
+          mountPath: /run/containerd/containerd.sock
+        - name: fifo
+          mountPath: /run/containerd/fifo
+      volumes:
+      - name: sock
+        hostPath:
+          path: /run/containerd/containerd.sock
+          type: Socket
+      - name: fifo
+        hostPath:
+          path: /run/containerd/fifo
+          type: DirectoryOrCreate
