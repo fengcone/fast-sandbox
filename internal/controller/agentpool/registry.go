@@ -143,6 +143,11 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		if a.PoolName != sb.Spec.PoolRef {
 			continue
 		}
+		// Namespace 强制校验：Sandbox 必须调度到同一 Namespace 的 Agent
+		// 原因：网络/存储策略通常限制在 Namespace 内
+		if a.Namespace != sb.Namespace {
+			continue
+		}
 		// Capacity 为 0 表示无限制，Capacity > 0 时检查容量
 		if a.Capacity > 0 && a.Allocated >= a.Capacity {
 			continue

@@ -730,10 +730,10 @@ logger.Error("Failed to create container", zap.Error(err))
 | ID | 问题 | 状态 | 完成日期 |
 |----|------|------|----------|
 | 1.1 | ExpireTime 逻辑错误 | ✅ 已完成 | 2026-01-18 |
-| 1.2 | Finalizer 忽略删除错误 | 🔄 待处理 | - |
-| 2.1 | PB 接口字段缺失 | 🔄 待处理 | - |
-| 3.1 | WorkingDir 未生效 | 🔄 待处理 | - |
-| 3.2 | 缺少优雅关闭 | 🔄 待处理 | - |
+| 1.2 | Finalizer 忽略删除错误 | ✅ 已完成 | 2026-01-18 |
+| 2.1 | PB 接口字段缺失 (Envs, WorkingDir) | ✅ 已完成 | 2026-01-18 |
+| 3.1 | WorkingDir 未生效 | ✅ 已完成 | 2026-01-18 |
+| 3.2 | 缺少优雅关闭 (SIGTERM → wait → SIGKILL) | ✅ 已完成 | 2026-01-18 |
 
 ### 额外修复
 | ID | 问题 | 状态 |
