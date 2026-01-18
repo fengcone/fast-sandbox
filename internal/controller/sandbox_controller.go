@@ -72,6 +72,19 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	finalizerName := "sandbox.fast.io/cleanup"
 	if sandbox.ObjectMeta.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
+			// Expired 状态：底层 sandbox 已删除，直接移除 finalizer
+			if sandbox.Status.Phase == "Expired" {
+				err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &apiv1alpha1.Sandbox{}
+					if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+						return err
+					}
+					controllerutil.RemoveFinalizer(latest, finalizerName)
+					return r.Update(ctx, latest)
+				})
+				return ctrl.Result{}, err
+			}
+
 			// 异步删除流程：Terminating → terminated → remove finalizer
 			if sandbox.Status.Phase == "Terminating" || sandbox.Status.Phase == "Bound" {
 				agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))

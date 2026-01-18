@@ -363,7 +363,7 @@ enum FailurePolicy {
 
 ---
 
-### 2.2 [严重] 缺少 UpdateSandbox 接口
+### 2.2 [严重] 缺少 UpdateSandbox 接口 ✅ FIXED
 
 **文件**: `api/proto/v1/fastpath.proto:7-19`
 
@@ -371,42 +371,16 @@ enum FailurePolicy {
 - 无法通过 CLI 更新 `ExpireTime` 延长 Sandbox 生命周期
 - 无法通过 CLI 触发 `ResetRevision` 重启 Sandbox
 
-**建议添加**:
-```protobuf
-service FastPathService {
-  CreateSandbox(CreateRequest) returns (CreateResponse);
-  DeleteSandbox(DeleteRequest) returns (DeleteResponse);
-  UpdateSandbox(UpdateRequest) returns (UpdateResponse);  // 新增
-  ListSandboxes(ListRequest) returns (ListResponse);
-  GetSandbox(GetRequest) returns (SandboxInfo);
-}
+**修复**:
+- 添加了 UpdateSandbox RPC 到 fastpath.proto
+- 实现了 fsb-ctl update 和 reset 命令
+- 支持: --expire-time, --labels, --failure-policy, --recovery-timeout
 
-message UpdateRequest {
-    string sandbox_id = 1;
-    string namespace = 2;
-
-    // 可更新字段
-    int64 expire_time_seconds = 3;  // 更新过期时间
-    google.protobuf.Timestamp reset_revision = 4;  // 触发重启
-    map<string, string> labels = 5;  // 更新标签
-}
-
-message UpdateResponse {
-    bool success = 1;
-    SandboxInfo sandbox = 2;
-}
-```
-
-**CLI 命令**:
-```bash
-# 延长过期时间
-fsb-ctl update my-sandbox --expire-time 3600
-
-# 重启 Sandbox
-fsb-ctl reset my-sandbox
-```
+**验证**:
+- E2E 测试 `test/e2e/05-advanced-features/update-reset.sh` 通过
 
 **优先级**: P1
+**状态**: ✅ 已完成 (2026-01-18)
 
 ---
 
@@ -724,12 +698,12 @@ logger.Error("Failed to create container", zap.Error(err))
 | - | NAMESPACE 环境变量未传递给 Agent Pod | ✅ 已完成 |
 
 ### P1 - 高优先级 (影响生产可用性)
-| ID | 问题 | 影响 |
-|----|------|------|
-| 1.3 | Registry 全局锁 | 扩展性差 |
-| 1.4 | Namespace 隔离缺失 | 安全风险 |
-| 2.2 | 缺少 Update 接口 | 运维不便 |
-| 4.1 | 日志系统不统一 | 难以排查问题 |
+| ID | 问题 | 影响 | 状态 |
+|----|------|------|------|
+| 1.3 | Registry 全局锁 | 扩展性差 | 待修复 |
+| 1.4 | Namespace 隔离缺失 | 安全风险 | ✅ 已完成 |
+| 2.2 | 缺少 Update 接口 | 运维不便 | ✅ 已完成 |
+| 4.1 | 日志系统不统一 | 难以排查问题 | 待修复 |
 
 ### P2 - 中优先级 (改进体验)
 | ID | 问题 | 影响 |
