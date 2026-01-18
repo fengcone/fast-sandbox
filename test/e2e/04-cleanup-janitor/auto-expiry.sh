@@ -45,24 +45,50 @@ spec:
 EOF
 
     sleep 10
-    echo "  等待过期并被删除 (最多等待 60s)..."
-    local deleted=false
+    echo "  等待过期 (最多等待 60s)..."
+    local expired=false
     for i in $(seq 1 12); do
-        if ! kubectl get sandbox test-expiry -n "$TEST_NS" >/dev/null 2>&1; then
-            deleted=true
+        PHASE=$(kubectl get sandbox test-expiry -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [ "$PHASE" = "Expired" ]; then
+            expired=true
             break
         fi
-        echo "  检查 $i: Sandbox 仍存在..."
+        echo "  检查 $i: Sandbox Phase=$PHASE..."
         sleep 5
     done
 
-    if [ "$deleted" = "true" ]; then
-        echo "  ✓ Sandbox 已被自动垃圾回收"
+    if [ "$expired" = "true" ]; then
+        echo "  ✓ Sandbox 已过期，CRD 保留用于查询"
+
+        # 验证 CRD 仍然存在
+        if kubectl get sandbox test-expiry -n "$TEST_NS" >/dev/null 2>&1; then
+            echo "  ✓ CRD 保留成功"
+        else
+            echo "  ✗ CRD 被意外删除"
+            return 1
+        fi
+
+        # 验证状态字段
+        PHASE=$(kubectl get sandbox test-expiry -n "$TEST_NS" -o jsonpath='{.status.phase}')
+        ASSIGNED_POD=$(kubectl get sandbox test-expiry -n "$TEST_NS" -o jsonpath='{.status.assignedPod}')
+        SANDBOX_ID=$(kubectl get sandbox test-expiry -n "$TEST_NS" -o jsonpath='{.status.sandboxID}')
+
+        if [ "$PHASE" = "Expired" ] && [ "$ASSIGNED_POD" = "" ] && [ "$SANDBOX_ID" = "" ]; then
+            echo "  ✓ 状态字段正确: Phase=Expired, assignedPod 和 sandboxID 已清空"
+        else
+            echo "  ✗ 状态字段不正确: Phase=$PHASE, assignedPod=$ASSIGNED_POD, sandboxID=$SANDBOX_ID"
+            return 1
+        fi
     else
-        echo "  ❌ 过期后 Sandbox 仍然存在"
+        echo "  ❌ 过期后 Sandbox 状态未变为 Expired"
+        kubectl get sandbox test-expiry -n "$TEST_NS" -o yaml 2>/dev/null | tail -20
         kubectl delete sandbox test-expiry -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
+
+    # 清理 - 手动删除过期的 CRD
+    echo "  清理过期的 CRD..."
+    kubectl delete sandbox test-expiry -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 清理
     kubectl delete sandboxpool expiry-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1

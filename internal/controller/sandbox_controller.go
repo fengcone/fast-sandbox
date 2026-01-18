@@ -35,11 +35,30 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Check if sandbox has expired
 	if sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
 		if time.Now().After(sandbox.Spec.ExpireTime.Time) {
-			// Sandbox has expired, delete it
-			if err := r.Delete(ctx, &sandbox); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to delete expired sandbox: %w", err)
+			// Sandbox has expired - soft delete: remove runtime but keep CRD for history
+			if sandbox.Status.Phase != "Expired" {
+				// 1. Delete the underlying sandbox from Agent
+				if sandbox.Status.AssignedPod != "" {
+					if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
+						return ctrl.Result{}, fmt.Errorf("failed to delete sandbox from agent: %w", err)
+					}
+					r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
+				}
+
+				// 2. Update CRD status to "Expired" (keep CRD for history)
+				err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &apiv1alpha1.Sandbox{}
+					if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+						return err
+					}
+					latest.Status.Phase = "Expired"
+					latest.Status.AssignedPod = ""
+					latest.Status.SandboxID = ""
+					return r.Status().Update(ctx, latest)
+				})
+				return ctrl.Result{}, err
 			}
-			// Return without requeue since the sandbox is being deleted
+			// Already expired, no need to requeue
 			return ctrl.Result{}, nil
 		}
 		// Not expired yet, requeue after the remaining time
