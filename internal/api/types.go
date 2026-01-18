@@ -15,16 +15,16 @@ const (
 
 // SandboxSpec describes the desired state of a sandbox on an agent.
 type SandboxSpec struct {
-	SandboxID string `json:"sandboxId"`
-	// sandbox cr uid and name
-	ClaimUID  string            `json:"claimUid"`
-	ClaimName string            `json:"claimName"`
-	Image     string            `json:"image"`
-	CPU       string            `json:"cpu,omitempty"`
-	Memory    string            `json:"memory,omitempty"`
-	Command   []string          `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
+	SandboxID  string            `json:"sandboxId"`
+	ClaimUID   string            `json:"claimUid"`
+	ClaimName  string            `json:"claimName"`
+	Image      string            `json:"image"`
+	CPU        string            `json:"cpu,omitempty"`
+	Memory     string            `json:"memory,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Args       []string          `json:"args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	WorkingDir string            `json:"workingDir,omitempty"`
 }
 
 // SandboxStatus represents the observed state of a sandbox on an agent.

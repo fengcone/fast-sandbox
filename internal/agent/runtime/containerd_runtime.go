@@ -298,6 +298,11 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *SandboxConfig, image contain
 		oci.WithEnv(envMapToSlice(config.Env)),
 	}
 
+	// 设置工作目录
+	if config.WorkingDir != "" {
+		specOpts = append(specOpts, oci.WithProcessCwd(config.WorkingDir))
+	}
+
 	// 应用挂载点
 	if len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))

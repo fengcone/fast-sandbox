@@ -15,24 +15,26 @@ type SandboxMetadata struct {
 	Command     []string          // 启动命令
 	Args        []string          // 启动参数
 	Env         map[string]string // 环境变量
+	WorkingDir  string            // 工作目录
 	Port        int32             // 监听端口
 	PID         int               // 容器主进程 PID
 	Status      string            // 容器状态: "running", "stopped", "failed"
 	CreatedAt   int64             // 创建时间戳
 }
 
-// SandboxConfig 定义创建 sandbox 的配置
+// SandboxConfig defines the configuration for creating a sandbox.
 type SandboxConfig struct {
-	SandboxID string            // sandbox 的唯一标识符
-	ClaimUID  string            // 关联的 Sandbox UID
-	ClaimName string            // 关联的 Sandbox 名称
-	Image     string            // 容器镜像
-	Command   []string          // 启动命令（可选）
-	Args      []string          // 启动参数（可选）
-	Env       map[string]string // 环境变量（可选）
-	CPU       string            // CPU 配额，如 "500m"
-	Memory    string            // 内存配额，如 "1Gi"
-	Port      int32             // 期望的监听端口，0 表示自动分配
+	SandboxID  string            // sandbox unique identifier
+	ClaimUID   string            // associated Sandbox UID
+	ClaimName  string            // associated Sandbox name
+	Image      string            // container image
+	Command    []string          // startup command (optional)
+	Args       []string          // startup arguments (optional)
+	Env        map[string]string // environment variables (optional)
+	CPU        string            // CPU quota, e.g. "500m"
+	Memory     string            // memory quota, e.g. "1Gi"
+	Port       int32             // expected listening port, 0 means auto-assign
+	WorkingDir string            // working directory (optional)
 }
 
 // Runtime 定义容器运行时的抽象接口

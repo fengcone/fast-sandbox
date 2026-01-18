@@ -24,6 +24,7 @@ type SandboxConfig struct {
 	Args            []string          `yaml:"args,omitempty"`
 	ExposedPorts    []int32           `yaml:"exposed_ports,omitempty"`
 	Envs            map[string]string `yaml:"envs,omitempty"`
+	WorkingDir      string            `yaml:"working_dir,omitempty"`
 }
 
 var (
@@ -124,6 +125,8 @@ Priority: Flags > Config File > Interactive Input
 			ConsistencyMode: consistency,
 			Command:         config.Command,
 			Args:            config.Args,
+			Envs:            config.Envs,
+			WorkingDir:      config.WorkingDir,
 		}
 
 		resp, err := client.CreateSandbox(context.Background(), req)
@@ -247,6 +250,9 @@ consistency_mode: fast
 # Optional: Override entrypoint and arguments
 command: ["/bin/sleep", "3600"]
 args: []
+
+# Optional: Working directory
+# working_dir: /app
 
 # Optional: Expose ports
 # exposed_ports:

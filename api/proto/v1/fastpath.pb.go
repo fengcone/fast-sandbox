@@ -314,6 +314,8 @@ type CreateRequest struct {
 	Namespace       string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`                                                                      // 可选，默认为 "default"
 	ConsistencyMode ConsistencyMode        `protobuf:"varint,7,opt,name=consistency_mode,json=consistencyMode,proto3,enum=fastpath.v1.ConsistencyMode" json:"consistency_mode,omitempty"` // 可选，默认使用 Controller 配置
 	Name            string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`                                                                                // 可选，指定沙箱名称（用于测试故障注入）
+	Envs            map[string]string      `protobuf:"bytes,9,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`      // 环境变量
+	WorkingDir      string                 `protobuf:"bytes,10,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`                                                 // 工作目录
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -400,6 +402,20 @@ func (x *CreateRequest) GetConsistencyMode() ConsistencyMode {
 func (x *CreateRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateRequest) GetEnvs() map[string]string {
+	if x != nil {
+		return x.Envs
+	}
+	return nil
+}
+
+func (x *CreateRequest) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
 	}
 	return ""
 }
@@ -583,7 +599,7 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03R\tcreatedAt\x12\x14\n" +
 	"\x05image\x18\x06 \x01(\tR\x05image\x12\x19\n" +
-	"\bpool_ref\x18\a \x01(\tR\apoolRef\"\x8e\x02\n" +
+	"\bpool_ref\x18\a \x01(\tR\apoolRef\"\xa2\x03\n" +
 	"\rCreateRequest\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x19\n" +
 	"\bpool_ref\x18\x02 \x01(\tR\apoolRef\x12#\n" +
@@ -592,7 +608,14 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\x04args\x18\x05 \x03(\tR\x04args\x12\x1c\n" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12G\n" +
 	"\x10consistency_mode\x18\a \x01(\x0e2\x1c.fastpath.v1.ConsistencyModeR\x0fconsistencyMode\x12\x12\n" +
-	"\x04name\x18\b \x01(\tR\x04name\"j\n" +
+	"\x04name\x18\b \x01(\tR\x04name\x128\n" +
+	"\x04envs\x18\t \x03(\v2$.fastpath.v1.CreateRequest.EnvsEntryR\x04envs\x12\x1f\n" +
+	"\vworking_dir\x18\n" +
+	" \x01(\tR\n" +
+	"workingDir\x1a7\n" +
+	"\tEnvsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"j\n" +
 	"\x0eCreateResponse\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1b\n" +
@@ -628,7 +651,7 @@ func file_api_proto_v1_fastpath_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_v1_fastpath_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_proto_v1_fastpath_proto_goTypes = []any{
 	(ConsistencyMode)(0),   // 0: fastpath.v1.ConsistencyMode
 	(*ListRequest)(nil),    // 1: fastpath.v1.ListRequest
@@ -639,23 +662,25 @@ var file_api_proto_v1_fastpath_proto_goTypes = []any{
 	(*CreateResponse)(nil), // 6: fastpath.v1.CreateResponse
 	(*DeleteRequest)(nil),  // 7: fastpath.v1.DeleteRequest
 	(*DeleteResponse)(nil), // 8: fastpath.v1.DeleteResponse
+	nil,                    // 9: fastpath.v1.CreateRequest.EnvsEntry
 }
 var file_api_proto_v1_fastpath_proto_depIdxs = []int32{
 	4, // 0: fastpath.v1.ListResponse.items:type_name -> fastpath.v1.SandboxInfo
 	0, // 1: fastpath.v1.CreateRequest.consistency_mode:type_name -> fastpath.v1.ConsistencyMode
-	5, // 2: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
-	7, // 3: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
-	1, // 4: fastpath.v1.FastPathService.ListSandboxes:input_type -> fastpath.v1.ListRequest
-	3, // 5: fastpath.v1.FastPathService.GetSandbox:input_type -> fastpath.v1.GetRequest
-	6, // 6: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
-	8, // 7: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
-	2, // 8: fastpath.v1.FastPathService.ListSandboxes:output_type -> fastpath.v1.ListResponse
-	4, // 9: fastpath.v1.FastPathService.GetSandbox:output_type -> fastpath.v1.SandboxInfo
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	9, // 2: fastpath.v1.CreateRequest.envs:type_name -> fastpath.v1.CreateRequest.EnvsEntry
+	5, // 3: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
+	7, // 4: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
+	1, // 5: fastpath.v1.FastPathService.ListSandboxes:input_type -> fastpath.v1.ListRequest
+	3, // 6: fastpath.v1.FastPathService.GetSandbox:input_type -> fastpath.v1.GetRequest
+	6, // 7: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
+	8, // 8: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
+	2, // 9: fastpath.v1.FastPathService.ListSandboxes:output_type -> fastpath.v1.ListResponse
+	4, // 10: fastpath.v1.FastPathService.GetSandbox:output_type -> fastpath.v1.SandboxInfo
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_v1_fastpath_proto_init() }
@@ -669,7 +694,7 @@ func file_api_proto_v1_fastpath_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_v1_fastpath_proto_rawDesc), len(file_api_proto_v1_fastpath_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

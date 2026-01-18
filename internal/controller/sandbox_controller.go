@@ -245,9 +245,26 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 		return fmt.Errorf("no agent")
 	}
 	_, err := r.AgentClient.CreateSandbox(fmt.Sprintf("%s:8081", agentInfo.PodIP), &api.CreateSandboxRequest{
-		Sandbox: api.SandboxSpec{SandboxID: sandbox.Name, ClaimName: sandbox.Name, Image: sandbox.Spec.Image, Command: sandbox.Spec.Command, Args: sandbox.Spec.Args},
+		Sandbox: api.SandboxSpec{
+			SandboxID:  sandbox.Name,
+			ClaimName:  sandbox.Name,
+			Image:      sandbox.Spec.Image,
+			Command:    sandbox.Spec.Command,
+			Args:       sandbox.Spec.Args,
+			Env:        envVarToMap(sandbox.Spec.Envs),
+			WorkingDir: sandbox.Spec.WorkingDir,
+		},
 	})
 	return err
+}
+
+// envVarToMap converts K8s EnvVar slice to map[string]string
+func envVarToMap(envs []corev1.EnvVar) map[string]string {
+	result := make(map[string]string)
+	for _, e := range envs {
+		result[e.Name] = e.Value
+	}
+	return result
 }
 
 func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {

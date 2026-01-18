@@ -58,15 +58,16 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec api.SandboxSpec
 
 	// 2. 不存在则创建
 	config := &SandboxConfig{
-		SandboxID: spec.SandboxID,
-		ClaimUID:  spec.ClaimUID,
-		ClaimName: spec.ClaimName,
-		Image:     spec.Image,
-		Command:   spec.Command,
-		Args:      spec.Args,
-		Env:       spec.Env,
-		CPU:       spec.CPU,
-		Memory:    spec.Memory,
+		SandboxID:  spec.SandboxID,
+		ClaimUID:   spec.ClaimUID,
+		ClaimName:  spec.ClaimName,
+		Image:      spec.Image,
+		Command:    spec.Command,
+		Args:       spec.Args,
+		Env:        spec.Env,
+		CPU:        spec.CPU,
+		Memory:     spec.Memory,
+		WorkingDir: spec.WorkingDir,
 	}
 
 	createdAt := time.Now().Unix()

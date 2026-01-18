@@ -10,6 +10,7 @@ import (
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,6 +19,15 @@ import (
 const (
 	maxRetries = 3
 )
+
+// envMapToEnvVar converts map[string]string to K8s EnvVar slice
+func envMapToEnvVar(envs map[string]string) []corev1.EnvVar {
+	result := make([]corev1.EnvVar, 0, len(envs))
+	for k, v := range envs {
+		result = append(result, corev1.EnvVar{Name: k, Value: v})
+	}
+	return result
+}
 
 type Server struct {
 	fastpathv1.UnimplementedFastPathServiceServer
@@ -52,6 +62,8 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 			ExposedPorts: req.ExposedPorts,
 			Command:      req.Command,
 			Args:         req.Args,
+			Envs:         envMapToEnvVar(req.Envs),
+			WorkingDir:   req.WorkingDir,
 		},
 	}
 
@@ -61,20 +73,22 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 	}
 
 	if mode == api.ConsistencyModeStrong {
-		return s.createStrong(ctx, tempSB, agent)
+		return s.createStrong(ctx, tempSB, agent, req)
 	}
-	return s.createFast(ctx, tempSB, agent)
+	return s.createFast(ctx, tempSB, agent, req)
 }
 
-func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo) (*fastpathv1.CreateResponse, error) {
+func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
 	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
 	_, err := s.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
-			SandboxID: tempSB.Name,
-			ClaimName: tempSB.Name,
-			Image:     tempSB.Spec.Image,
-			Command:   tempSB.Spec.Command,
-			Args:      tempSB.Spec.Args,
+			SandboxID:  tempSB.Name,
+			ClaimName:  tempSB.Name,
+			Image:      tempSB.Spec.Image,
+			Command:    tempSB.Spec.Command,
+			Args:       tempSB.Spec.Args,
+			Env:        req.Envs,
+			WorkingDir: req.WorkingDir,
 		},
 	})
 	if err != nil {
@@ -87,7 +101,7 @@ func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, ag
 	return &fastpathv1.CreateResponse{SandboxId: tempSB.Name, AgentPod: agent.PodName, Endpoints: s.getEndpoints(agent.PodIP, tempSB)}, nil
 }
 
-func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo) (*fastpathv1.CreateResponse, error) {
+func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
 	if err := s.K8sClient.Create(ctx, tempSB); err != nil {
 		s.Registry.Release(agent.ID, tempSB)
 		return nil, err
@@ -96,12 +110,14 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
 	_, err := s.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
-			SandboxID: tempSB.Name,
-			ClaimUID:  string(tempSB.UID),
-			ClaimName: tempSB.Name,
-			Image:     tempSB.Spec.Image,
-			Command:   tempSB.Spec.Command,
-			Args:      tempSB.Spec.Args,
+			SandboxID:  tempSB.Name,
+			ClaimUID:   string(tempSB.UID),
+			ClaimName:  tempSB.Name,
+			Image:      tempSB.Spec.Image,
+			Command:    tempSB.Spec.Command,
+			Args:       tempSB.Spec.Args,
+			Env:        req.Envs,
+			WorkingDir: req.WorkingDir,
 		},
 	})
 	if err != nil {
