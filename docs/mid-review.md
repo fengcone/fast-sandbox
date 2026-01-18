@@ -41,56 +41,26 @@
 
 ---
 
-### 1.2 [严重] Finalizer 逻辑错误忽略删除错误
+### 1.2 [严重] Finalizer 逻辑错误忽略删除错误 ✅ FIXED
 
-**文件**: `internal/controller/sandbox_controller.go:54-71`
+**文件**: `internal/controller/sandbox_controller.go:72-94`
 
 **问题描述**:
-```go
-if sandbox.ObjectMeta.DeletionTimestamp != nil {
-    if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
-        if sandbox.Status.AssignedPod != "" {
-            r.deleteFromAgent(ctx, &sandbox)  // 错误被忽略！
-            r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
-        }
-        // ...
-    }
-}
-```
-
-**问题**:
 - `deleteFromAgent` 的返回值被忽略
 - 如果 Agent 删除失败，Registry 仍然会被释放
 - 最后 CRD Finalizer 被移除，但底层 Sandbox 可能还存在
 
-**建议修复**:
-```go
-if sandbox.ObjectMeta.DeletionTimestamp != nil {
-    if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
-        if sandbox.Status.AssignedPod != "" {
-            // 同步删除，确保成功
-            if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
-                // Agent 删除失败，返回错误重试
-                return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
-            }
-            r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
-        }
-        // 只有确认删除成功后才移除 Finalizer
-        err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-            latest := &apiv1alpha1.Sandbox{}
-            if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-                return err
-            }
-            controllerutil.RemoveFinalizer(latest, finalizerName)
-            return r.Update(ctx, latest)
-        })
-        return ctrl.Result{}, err
-    }
-    return ctrl.Result{}, nil
-}
-```
+**修复方案**:
+- 同步删除，检查 `deleteFromAgent` 返回值
+- 删除失败时返回错误触发重试（controller-runtime 指数退避）
+- 删除成功后才移除 Finalizer
+
+**验证**:
+- 单元测试 `internal/controller/sandbox_controller_test.go` 通过
+- E2E 测试 `test/e2e/03-fault-recovery/finalizer-cleanup.sh` 通过
 
 **优先级**: P0
+**状态**: ✅ 已完成 (2026-01-18)
 
 ---
 

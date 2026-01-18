@@ -23,7 +23,7 @@ type SandboxReconciler struct {
 	Scheme      *runtime.Scheme
 	Ctx         context.Context
 	Registry    agentpool.AgentRegistry
-	AgentClient *api.AgentClient
+	AgentClient api.AgentAPIClient
 }
 
 func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -73,9 +73,14 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if sandbox.ObjectMeta.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
 			if sandbox.Status.AssignedPod != "" {
-				r.deleteFromAgent(ctx, &sandbox)
+				// Synchronously delete from Agent - ensure success before proceeding
+				if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
+					// Agent deletion failed, return error to trigger retry
+					return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
+				}
 				r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
 			}
+			// Only remove Finalizer after Agent deletion is confirmed
 			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
 				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {

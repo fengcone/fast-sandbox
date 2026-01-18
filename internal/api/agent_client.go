@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// AgentAPIClient defines the interface for communicating with sandbox agents.
+// This allows both the real HTTP client and mocks to be used interchangeably.
+type AgentAPIClient interface {
+	CreateSandbox(agentEndpoint string, req *CreateSandboxRequest) (*CreateSandboxResponse, error)
+	DeleteSandbox(agentEndpoint string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error)
+	GetAgentStatusWithContext(ctx context.Context, agentEndpoint string) (*AgentStatus, error)
+}
+
 const (
 	// defaultAgentTimeout is the default timeout for agent API calls
 	defaultAgentTimeout = 5 * time.Second
