@@ -144,14 +144,7 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Get Sandboxes
-	sandboxes, err := s.sandboxManager.ListSandboxes(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 2. Get Images
+	// 1. Get Images
 	images, err := s.sandboxManager.ListImages(r.Context())
 	if err != nil {
 		log.Printf("Warning: failed to list images: %v", err)
@@ -159,16 +152,8 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		images = []string{}
 	}
 
-	// Convert runtime metadata to api status
-	var sbStatuses []api.SandboxStatus
-	for _, sb := range sandboxes {
-		sbStatuses = append(sbStatuses, api.SandboxStatus{
-			SandboxID: sb.SandboxID,
-			ClaimUID:  sb.ClaimUID,
-			Phase:     sb.Status,
-			CreatedAt: sb.CreatedAt, // Include creation time for orphan cleanup
-		})
-	}
+	// 2. Get Sandbox Statuses (包含 phase 信息: running/terminating/terminated)
+	sbStatuses := s.sandboxManager.GetAllSandboxStatuses(r.Context())
 
 	// Node Name from Env
 	nodeName := os.Getenv("NODE_NAME")
@@ -177,7 +162,7 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		AgentID:         os.Getenv("POD_NAME"), // Use Pod Name as Agent ID
 		NodeName:        nodeName,
 		Capacity:        s.sandboxManager.GetCapacity(),
-		Allocated:       len(sandboxes),
+		Allocated:       len(sbStatuses),
 		Images:          images,
 		SandboxStatuses: sbStatuses,
 	}

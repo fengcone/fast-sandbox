@@ -72,15 +72,67 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	finalizerName := "sandbox.fast.io/cleanup"
 	if sandbox.ObjectMeta.DeletionTimestamp != nil {
 		if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
-			if sandbox.Status.AssignedPod != "" {
-				// Synchronously delete from Agent - ensure success before proceeding
-				if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
-					// Agent deletion failed, return error to trigger retry
-					return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
+			// 异步删除流程：Terminating → terminated → remove finalizer
+			if sandbox.Status.Phase == "Terminating" || sandbox.Status.Phase == "Bound" {
+				agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+				if !ok {
+					// Agent 不存在，直接清理 finalizer
+					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+						latest := &apiv1alpha1.Sandbox{}
+						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+							return err
+						}
+						controllerutil.RemoveFinalizer(latest, finalizerName)
+						return r.Update(ctx, latest)
+					})
+					return ctrl.Result{}, err
 				}
-				r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
+
+				// 检查 agent 上报的状态
+				agentStatus, hasStatus := agent.SandboxStatuses[sandbox.Name]
+
+				// 第一次进入删除流程，调用 agent 删除（异步）
+				if sandbox.Status.Phase == "Bound" {
+					if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
+						// Agent 删除调用失败，重试
+						return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
+					}
+					// 标记为 Terminating
+					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+						latest := &apiv1alpha1.Sandbox{}
+						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+							return err
+						}
+						latest.Status.Phase = "Terminating"
+						return r.Status().Update(ctx, latest)
+					})
+					if err != nil {
+						return ctrl.Result{}, err
+					}
+					// Requeue 等待下次检查
+					return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+				}
+
+				// 已经是 Terminating 状态，检查 agent 是否完成删除
+				if hasStatus && agentStatus.Phase == "terminated" {
+					// Agent 已完成删除，释放资源并移除 finalizer
+					r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
+					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+						latest := &apiv1alpha1.Sandbox{}
+						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+							return err
+						}
+						controllerutil.RemoveFinalizer(latest, finalizerName)
+						return r.Update(ctx, latest)
+					})
+					return ctrl.Result{}, err
+				}
+
+				// 仍在 terminating 中，继续等待
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
-			// Only remove Finalizer after Agent deletion is confirmed
+
+			// Phase 不是 Bound/Terminating，直接清理
 			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &apiv1alpha1.Sandbox{}
 				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {

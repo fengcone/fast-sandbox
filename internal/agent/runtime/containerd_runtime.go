@@ -425,12 +425,11 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 		return nil
 	}
 
-	// 停止并删除任务
+	// 停止并删除任务（立即删除，用于非优雅关闭场景）
 	task, err := container.Task(ctx, nil)
 	if err == nil {
-		// 先发送 SIGKILL 停止任务
+		// 直接发送 SIGKILL
 		_ = task.Kill(ctx, syscall.SIGKILL)
-		// 等待任务退出并删除（使用 WithProcessKill 确保进程被终止）
 		_, _ = task.Delete(ctx, containerd.WithProcessKill)
 	}
 
@@ -442,10 +441,96 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 	return nil
 }
 
+// GracefulDeleteSandbox 优雅删除 sandbox（SIGTERM → wait → SIGKILL）
+// 返回是否成功执行优雅关闭（false 表示需要强制删除）
+func (r *ContainerdRuntime) GracefulDeleteSandbox(ctx context.Context, sandboxID string, waitTimeout time.Duration) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+	container, err := r.client.LoadContainer(ctx, sandboxID)
+	if err != nil {
+		// 容器不存在，标记为已删除
+		delete(r.sandboxes, sandboxID)
+		return true
+	}
+
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		// 任务不存在，直接删除容器
+		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
+		delete(r.sandboxes, sandboxID)
+		return true
+	}
+
+	// 1. 发送 SIGTERM
+	if err := task.Kill(ctx, syscall.SIGTERM); err != nil {
+		fmt.Printf("Failed to send SIGTERM to %s: %v, force delete\n", sandboxID, err)
+		_, _ = task.Delete(ctx, containerd.WithProcessKill)
+		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
+		delete(r.sandboxes, sandboxID)
+		return false
+	}
+
+	// 2. 等待进程退出
+	waitCh, err := task.Wait(ctx)
+	if err != nil {
+		fmt.Printf("Failed to wait for %s: %v\n", sandboxID, err)
+	}
+
+	// 3. 超时检查
+	select {
+	case <-waitCh:
+		// 进程正常退出
+	case <-time.After(waitTimeout):
+		// 超时，发送 SIGKILL
+		fmt.Printf("Sandbox %s did not exit after %v, sending SIGKILL\n", sandboxID, waitTimeout)
+		_ = task.Kill(ctx, syscall.SIGKILL)
+		<-waitCh // 等待 SIGKILL 生效
+	}
+
+	// 4. 删除任务和容器
+	_, _ = task.Delete(ctx, containerd.WithProcessKill)
+	_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
+	delete(r.sandboxes, sandboxID)
+	return true
+}
+
 func (r *ContainerdRuntime) GetSandbox(ctx context.Context, sandboxID string) (*SandboxMetadata, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.sandboxes[sandboxID], nil
+}
+
+// GetSandboxStatus 获取 sandbox 的运行时状态
+// 返回: Phase (running/stopped/terminated), error
+func (r *ContainerdRuntime) GetSandboxStatus(ctx context.Context, sandboxID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// 先检查本地缓存
+	if meta, ok := r.sandboxes[sandboxID]; ok {
+		return meta.Status, nil
+	}
+
+	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+	container, err := r.client.LoadContainer(ctx, sandboxID)
+	if err != nil {
+		// 容器不存在
+		return "terminated", nil
+	}
+
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		// 任务不存在，容器已停止
+		return "stopped", nil
+	}
+
+	status, err := task.Status(ctx)
+	if err != nil {
+		return "unknown", err
+	}
+
+	return string(status.Status), nil
 }
 
 func (r *ContainerdRuntime) ListSandboxes(ctx context.Context) ([]*SandboxMetadata, error) {

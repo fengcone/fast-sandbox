@@ -70,6 +70,11 @@ type Runtime interface {
 	// PullImage 拉取指定的容器镜像
 	// 如果镜像已存在则跳过
 	PullImage(ctx context.Context, image string) error
+
+	// GetSandboxStatus 获取 sandbox 的运行时状态（用于心跳上报）
+	// 返回: Phase (running/stopped/terminated), error
+	GetSandboxStatus(ctx context.Context, sandboxID string) (string, error)
+
 	// Close 关闭运行时客户端连接
 	Close() error
 }
