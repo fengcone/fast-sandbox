@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fast-sandbox-janitor
+  namespace: default
+  labels:
+    app: fast-sandbox-janitor
+spec:
+  selector:
+    matchLabels:
+      app: fast-sandbox-janitor
+  template:
+    metadata:
+      labels:
+        app: fast-sandbox-janitor
+    spec:
+      serviceAccountName: fast-sandbox-manager-role
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: janitor
+        image: fast-sandbox/janitor:dev
+        imagePullPolicy: IfNotPresent
+        args:
+        - --scan-interval=2m
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
