@@ -72,6 +72,53 @@ func (ConsistencyMode) EnumDescriptor() ([]byte, []int) {
 	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{0}
 }
 
+// FailurePolicy 定义故障恢复策略
+type FailurePolicy int32
+
+const (
+	FailurePolicy_MANUAL        FailurePolicy = 0 // 仅报告状态，不自动恢复
+	FailurePolicy_AUTO_RECREATE FailurePolicy = 1 // 自动重新调度
+)
+
+// Enum value maps for FailurePolicy.
+var (
+	FailurePolicy_name = map[int32]string{
+		0: "MANUAL",
+		1: "AUTO_RECREATE",
+	}
+	FailurePolicy_value = map[string]int32{
+		"MANUAL":        0,
+		"AUTO_RECREATE": 1,
+	}
+)
+
+func (x FailurePolicy) Enum() *FailurePolicy {
+	p := new(FailurePolicy)
+	*p = x
+	return p
+}
+
+func (x FailurePolicy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FailurePolicy) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_proto_v1_fastpath_proto_enumTypes[1].Descriptor()
+}
+
+func (FailurePolicy) Type() protoreflect.EnumType {
+	return &file_api_proto_v1_fastpath_proto_enumTypes[1]
+}
+
+func (x FailurePolicy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FailurePolicy.Descriptor instead.
+func (FailurePolicy) EnumDescriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{1}
+}
+
 type ListRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
@@ -576,6 +623,207 @@ func (x *DeleteResponse) GetSuccess() bool {
 	return false
 }
 
+type UpdateRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SandboxId string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	Namespace string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	// 可更新字段 (only one at a time, except labels)
+	//
+	// Types that are valid to be assigned to Update:
+	//
+	//	*UpdateRequest_ExpireTimeSeconds
+	//	*UpdateRequest_ResetRevision
+	//	*UpdateRequest_FailurePolicy
+	//	*UpdateRequest_RecoveryTimeoutSeconds
+	Update isUpdateRequest_Update `protobuf_oneof:"update"`
+	// 标签更新 (可以与其他字段同时更新)
+	Labels        map[string]string `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateRequest) Reset() {
+	*x = UpdateRequest{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateRequest) ProtoMessage() {}
+
+func (x *UpdateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateRequest.ProtoReflect.Descriptor instead.
+func (*UpdateRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *UpdateRequest) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *UpdateRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *UpdateRequest) GetUpdate() isUpdateRequest_Update {
+	if x != nil {
+		return x.Update
+	}
+	return nil
+}
+
+func (x *UpdateRequest) GetExpireTimeSeconds() int64 {
+	if x != nil {
+		if x, ok := x.Update.(*UpdateRequest_ExpireTimeSeconds); ok {
+			return x.ExpireTimeSeconds
+		}
+	}
+	return 0
+}
+
+func (x *UpdateRequest) GetResetRevision() string {
+	if x != nil {
+		if x, ok := x.Update.(*UpdateRequest_ResetRevision); ok {
+			return x.ResetRevision
+		}
+	}
+	return ""
+}
+
+func (x *UpdateRequest) GetFailurePolicy() FailurePolicy {
+	if x != nil {
+		if x, ok := x.Update.(*UpdateRequest_FailurePolicy); ok {
+			return x.FailurePolicy
+		}
+	}
+	return FailurePolicy_MANUAL
+}
+
+func (x *UpdateRequest) GetRecoveryTimeoutSeconds() int32 {
+	if x != nil {
+		if x, ok := x.Update.(*UpdateRequest_RecoveryTimeoutSeconds); ok {
+			return x.RecoveryTimeoutSeconds
+		}
+	}
+	return 0
+}
+
+func (x *UpdateRequest) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+type isUpdateRequest_Update interface {
+	isUpdateRequest_Update()
+}
+
+type UpdateRequest_ExpireTimeSeconds struct {
+	ExpireTimeSeconds int64 `protobuf:"varint,3,opt,name=expire_time_seconds,json=expireTimeSeconds,proto3,oneof"` // Unix timestamp, 0 = remove expiry
+}
+
+type UpdateRequest_ResetRevision struct {
+	ResetRevision string `protobuf:"bytes,4,opt,name=reset_revision,json=resetRevision,proto3,oneof"` // ISO8601 timestamp, 触发重启
+}
+
+type UpdateRequest_FailurePolicy struct {
+	FailurePolicy FailurePolicy `protobuf:"varint,5,opt,name=failure_policy,json=failurePolicy,proto3,enum=fastpath.v1.FailurePolicy,oneof"` // 更新故障策略
+}
+
+type UpdateRequest_RecoveryTimeoutSeconds struct {
+	RecoveryTimeoutSeconds int32 `protobuf:"varint,6,opt,name=recovery_timeout_seconds,json=recoveryTimeoutSeconds,proto3,oneof"`
+}
+
+func (*UpdateRequest_ExpireTimeSeconds) isUpdateRequest_Update() {}
+
+func (*UpdateRequest_ResetRevision) isUpdateRequest_Update() {}
+
+func (*UpdateRequest_FailurePolicy) isUpdateRequest_Update() {}
+
+func (*UpdateRequest_RecoveryTimeoutSeconds) isUpdateRequest_Update() {}
+
+type UpdateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Sandbox       *SandboxInfo           `protobuf:"bytes,3,opt,name=sandbox,proto3" json:"sandbox,omitempty"` // 更新后的状态
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateResponse) Reset() {
+	*x = UpdateResponse{}
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateResponse) ProtoMessage() {}
+
+func (x *UpdateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_v1_fastpath_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateResponse.ProtoReflect.Descriptor instead.
+func (*UpdateResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UpdateResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UpdateResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateResponse) GetSandbox() *SandboxInfo {
+	if x != nil {
+		return x.Sandbox
+	}
+	return nil
+}
+
 var File_api_proto_v1_fastpath_proto protoreflect.FileDescriptor
 
 const file_api_proto_v1_fastpath_proto_rawDesc = "" +
@@ -626,14 +874,36 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"*\n" +
 	"\x0eDeleteResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*'\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xad\x03\n" +
+	"\rUpdateRequest\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x120\n" +
+	"\x13expire_time_seconds\x18\x03 \x01(\x03H\x00R\x11expireTimeSeconds\x12'\n" +
+	"\x0ereset_revision\x18\x04 \x01(\tH\x00R\rresetRevision\x12C\n" +
+	"\x0efailure_policy\x18\x05 \x01(\x0e2\x1a.fastpath.v1.FailurePolicyH\x00R\rfailurePolicy\x12:\n" +
+	"\x18recovery_timeout_seconds\x18\x06 \x01(\x05H\x00R\x16recoveryTimeoutSeconds\x12>\n" +
+	"\x06labels\x18\a \x03(\v2&.fastpath.v1.UpdateRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\b\n" +
+	"\x06update\"x\n" +
+	"\x0eUpdateResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x122\n" +
+	"\asandbox\x18\x03 \x01(\v2\x18.fastpath.v1.SandboxInfoR\asandbox*'\n" +
 	"\x0fConsistencyMode\x12\b\n" +
 	"\x04FAST\x10\x00\x12\n" +
 	"\n" +
-	"\x06STRONG\x10\x012\xac\x02\n" +
+	"\x06STRONG\x10\x01*.\n" +
+	"\rFailurePolicy\x12\n" +
+	"\n" +
+	"\x06MANUAL\x10\x00\x12\x11\n" +
+	"\rAUTO_RECREATE\x10\x012\xf6\x02\n" +
 	"\x0fFastPathService\x12H\n" +
 	"\rCreateSandbox\x12\x1a.fastpath.v1.CreateRequest\x1a\x1b.fastpath.v1.CreateResponse\x12H\n" +
-	"\rDeleteSandbox\x12\x1a.fastpath.v1.DeleteRequest\x1a\x1b.fastpath.v1.DeleteResponse\x12D\n" +
+	"\rDeleteSandbox\x12\x1a.fastpath.v1.DeleteRequest\x1a\x1b.fastpath.v1.DeleteResponse\x12H\n" +
+	"\rUpdateSandbox\x12\x1a.fastpath.v1.UpdateRequest\x1a\x1b.fastpath.v1.UpdateResponse\x12D\n" +
 	"\rListSandboxes\x12\x18.fastpath.v1.ListRequest\x1a\x19.fastpath.v1.ListResponse\x12?\n" +
 	"\n" +
 	"GetSandbox\x12\x17.fastpath.v1.GetRequest\x1a\x18.fastpath.v1.SandboxInfoB&Z$fast-sandbox/api/proto/v1;fastpathv1b\x06proto3"
@@ -650,37 +920,46 @@ func file_api_proto_v1_fastpath_proto_rawDescGZIP() []byte {
 	return file_api_proto_v1_fastpath_proto_rawDescData
 }
 
-var file_api_proto_v1_fastpath_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_api_proto_v1_fastpath_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_api_proto_v1_fastpath_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_api_proto_v1_fastpath_proto_goTypes = []any{
 	(ConsistencyMode)(0),   // 0: fastpath.v1.ConsistencyMode
-	(*ListRequest)(nil),    // 1: fastpath.v1.ListRequest
-	(*ListResponse)(nil),   // 2: fastpath.v1.ListResponse
-	(*GetRequest)(nil),     // 3: fastpath.v1.GetRequest
-	(*SandboxInfo)(nil),    // 4: fastpath.v1.SandboxInfo
-	(*CreateRequest)(nil),  // 5: fastpath.v1.CreateRequest
-	(*CreateResponse)(nil), // 6: fastpath.v1.CreateResponse
-	(*DeleteRequest)(nil),  // 7: fastpath.v1.DeleteRequest
-	(*DeleteResponse)(nil), // 8: fastpath.v1.DeleteResponse
-	nil,                    // 9: fastpath.v1.CreateRequest.EnvsEntry
+	(FailurePolicy)(0),     // 1: fastpath.v1.FailurePolicy
+	(*ListRequest)(nil),    // 2: fastpath.v1.ListRequest
+	(*ListResponse)(nil),   // 3: fastpath.v1.ListResponse
+	(*GetRequest)(nil),     // 4: fastpath.v1.GetRequest
+	(*SandboxInfo)(nil),    // 5: fastpath.v1.SandboxInfo
+	(*CreateRequest)(nil),  // 6: fastpath.v1.CreateRequest
+	(*CreateResponse)(nil), // 7: fastpath.v1.CreateResponse
+	(*DeleteRequest)(nil),  // 8: fastpath.v1.DeleteRequest
+	(*DeleteResponse)(nil), // 9: fastpath.v1.DeleteResponse
+	(*UpdateRequest)(nil),  // 10: fastpath.v1.UpdateRequest
+	(*UpdateResponse)(nil), // 11: fastpath.v1.UpdateResponse
+	nil,                    // 12: fastpath.v1.CreateRequest.EnvsEntry
+	nil,                    // 13: fastpath.v1.UpdateRequest.LabelsEntry
 }
 var file_api_proto_v1_fastpath_proto_depIdxs = []int32{
-	4, // 0: fastpath.v1.ListResponse.items:type_name -> fastpath.v1.SandboxInfo
-	0, // 1: fastpath.v1.CreateRequest.consistency_mode:type_name -> fastpath.v1.ConsistencyMode
-	9, // 2: fastpath.v1.CreateRequest.envs:type_name -> fastpath.v1.CreateRequest.EnvsEntry
-	5, // 3: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
-	7, // 4: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
-	1, // 5: fastpath.v1.FastPathService.ListSandboxes:input_type -> fastpath.v1.ListRequest
-	3, // 6: fastpath.v1.FastPathService.GetSandbox:input_type -> fastpath.v1.GetRequest
-	6, // 7: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
-	8, // 8: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
-	2, // 9: fastpath.v1.FastPathService.ListSandboxes:output_type -> fastpath.v1.ListResponse
-	4, // 10: fastpath.v1.FastPathService.GetSandbox:output_type -> fastpath.v1.SandboxInfo
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5,  // 0: fastpath.v1.ListResponse.items:type_name -> fastpath.v1.SandboxInfo
+	0,  // 1: fastpath.v1.CreateRequest.consistency_mode:type_name -> fastpath.v1.ConsistencyMode
+	12, // 2: fastpath.v1.CreateRequest.envs:type_name -> fastpath.v1.CreateRequest.EnvsEntry
+	1,  // 3: fastpath.v1.UpdateRequest.failure_policy:type_name -> fastpath.v1.FailurePolicy
+	13, // 4: fastpath.v1.UpdateRequest.labels:type_name -> fastpath.v1.UpdateRequest.LabelsEntry
+	5,  // 5: fastpath.v1.UpdateResponse.sandbox:type_name -> fastpath.v1.SandboxInfo
+	6,  // 6: fastpath.v1.FastPathService.CreateSandbox:input_type -> fastpath.v1.CreateRequest
+	8,  // 7: fastpath.v1.FastPathService.DeleteSandbox:input_type -> fastpath.v1.DeleteRequest
+	10, // 8: fastpath.v1.FastPathService.UpdateSandbox:input_type -> fastpath.v1.UpdateRequest
+	2,  // 9: fastpath.v1.FastPathService.ListSandboxes:input_type -> fastpath.v1.ListRequest
+	4,  // 10: fastpath.v1.FastPathService.GetSandbox:input_type -> fastpath.v1.GetRequest
+	7,  // 11: fastpath.v1.FastPathService.CreateSandbox:output_type -> fastpath.v1.CreateResponse
+	9,  // 12: fastpath.v1.FastPathService.DeleteSandbox:output_type -> fastpath.v1.DeleteResponse
+	11, // 13: fastpath.v1.FastPathService.UpdateSandbox:output_type -> fastpath.v1.UpdateResponse
+	3,  // 14: fastpath.v1.FastPathService.ListSandboxes:output_type -> fastpath.v1.ListResponse
+	5,  // 15: fastpath.v1.FastPathService.GetSandbox:output_type -> fastpath.v1.SandboxInfo
+	11, // [11:16] is the sub-list for method output_type
+	6,  // [6:11] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_v1_fastpath_proto_init() }
@@ -688,13 +967,19 @@ func file_api_proto_v1_fastpath_proto_init() {
 	if File_api_proto_v1_fastpath_proto != nil {
 		return
 	}
+	file_api_proto_v1_fastpath_proto_msgTypes[8].OneofWrappers = []any{
+		(*UpdateRequest_ExpireTimeSeconds)(nil),
+		(*UpdateRequest_ResetRevision)(nil),
+		(*UpdateRequest_FailurePolicy)(nil),
+		(*UpdateRequest_RecoveryTimeoutSeconds)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_v1_fastpath_proto_rawDesc), len(file_api_proto_v1_fastpath_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

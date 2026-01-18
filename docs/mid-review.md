@@ -183,7 +183,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 
 ---
 
-### 1.4 [中等] Namespace 隔离缺失
+### 1.4 [中等] Namespace 隔离缺失 ✅ FIXED
 
 **文件**: `internal/controller/agentpool/registry.go:128-203`
 
@@ -192,32 +192,15 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 - 但 Sandbox 和 Agent 必须在同一 Namespace（网络/存储限制）
 - 当前 `Allocate` 没有检查 Namespace 匹配
 
-**建议修复**:
-```go
-func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error) {
-    // ...
-    for id, a := range r.agents {
-        if a.PoolName != sb.Spec.PoolRef {
-            continue
-        }
-        // Namespace 强制校验
-        if a.Namespace != sb.Namespace {
-            continue
-        }
-        // ...
-    }
-}
-```
+**修复**:
+- 在 `Allocate` 中添加 Namespace 强制校验
+- 跨 Namespace 的 Sandbox 将无法被调度，保持 Pending 状态
 
-同时在 `SandboxPoolReconciler` 中添加验证：
-```go
-// 确保 Agent Pool 和 Sandbox 在同一 Namespace
-if pool.Namespace != sandbox.Namespace {
-    return ctrl.Result{}, fmt.Errorf("cross-namespace scheduling not supported")
-}
-```
+**验证**:
+- E2E 测试 `test/e2e/01-basic-validation/namespace-isolation.sh` 通过
 
 **优先级**: P1
+**状态**: ✅ 已完成 (2026-01-18)
 
 ---
 

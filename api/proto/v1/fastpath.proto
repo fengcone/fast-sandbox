@@ -11,6 +11,9 @@ service FastPathService {
   // DeleteSandbox 极速删除沙箱
   rpc DeleteSandbox(DeleteRequest) returns (DeleteResponse);
 
+  // UpdateSandbox 更新沙箱配置（过期时间、重启、策略等）
+  rpc UpdateSandbox(UpdateRequest) returns (UpdateResponse);
+
   // ListSandboxes 获取沙箱列表
   rpc ListSandboxes(ListRequest) returns (ListResponse);
 
@@ -81,4 +84,32 @@ message DeleteRequest {
 
 message DeleteResponse {
   bool success = 1;
+}
+
+// FailurePolicy 定义故障恢复策略
+enum FailurePolicy {
+  MANUAL = 0;        // 仅报告状态，不自动恢复
+  AUTO_RECREATE = 1; // 自动重新调度
+}
+
+message UpdateRequest {
+  string sandbox_id = 1;
+  string namespace = 2;
+
+  // 可更新字段 (only one at a time, except labels)
+  oneof update {
+    int64 expire_time_seconds = 3;     // Unix timestamp, 0 = remove expiry
+    string reset_revision = 4;         // ISO8601 timestamp, 触发重启
+    FailurePolicy failure_policy = 5;  // 更新故障策略
+    int32 recovery_timeout_seconds = 6;
+  }
+
+  // 标签更新 (可以与其他字段同时更新)
+  map<string, string> labels = 7;
+}
+
+message UpdateResponse {
+  bool success = 1;
+  string message = 2;
+  SandboxInfo sandbox = 3;  // 更新后的状态
 }

@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	FastPathService_CreateSandbox_FullMethodName = "/fastpath.v1.FastPathService/CreateSandbox"
 	FastPathService_DeleteSandbox_FullMethodName = "/fastpath.v1.FastPathService/DeleteSandbox"
+	FastPathService_UpdateSandbox_FullMethodName = "/fastpath.v1.FastPathService/UpdateSandbox"
 	FastPathService_ListSandboxes_FullMethodName = "/fastpath.v1.FastPathService/ListSandboxes"
 	FastPathService_GetSandbox_FullMethodName    = "/fastpath.v1.FastPathService/GetSandbox"
 )
@@ -33,6 +34,8 @@ type FastPathServiceClient interface {
 	CreateSandbox(ctx context.Context, in *CreateRequest, opts ...grpc.CallOption) (*CreateResponse, error)
 	// DeleteSandbox 极速删除沙箱
 	DeleteSandbox(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
+	// UpdateSandbox 更新沙箱配置（过期时间、重启、策略等）
+	UpdateSandbox(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error)
 	// ListSandboxes 获取沙箱列表
 	ListSandboxes(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	// GetSandbox 获取沙箱详情
@@ -67,6 +70,16 @@ func (c *fastPathServiceClient) DeleteSandbox(ctx context.Context, in *DeleteReq
 	return out, nil
 }
 
+func (c *fastPathServiceClient) UpdateSandbox(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateResponse)
+	err := c.cc.Invoke(ctx, FastPathService_UpdateSandbox_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *fastPathServiceClient) ListSandboxes(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListResponse)
@@ -95,6 +108,8 @@ type FastPathServiceServer interface {
 	CreateSandbox(context.Context, *CreateRequest) (*CreateResponse, error)
 	// DeleteSandbox 极速删除沙箱
 	DeleteSandbox(context.Context, *DeleteRequest) (*DeleteResponse, error)
+	// UpdateSandbox 更新沙箱配置（过期时间、重启、策略等）
+	UpdateSandbox(context.Context, *UpdateRequest) (*UpdateResponse, error)
 	// ListSandboxes 获取沙箱列表
 	ListSandboxes(context.Context, *ListRequest) (*ListResponse, error)
 	// GetSandbox 获取沙箱详情
@@ -114,6 +129,9 @@ func (UnimplementedFastPathServiceServer) CreateSandbox(context.Context, *Create
 }
 func (UnimplementedFastPathServiceServer) DeleteSandbox(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSandbox not implemented")
+}
+func (UnimplementedFastPathServiceServer) UpdateSandbox(context.Context, *UpdateRequest) (*UpdateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateSandbox not implemented")
 }
 func (UnimplementedFastPathServiceServer) ListSandboxes(context.Context, *ListRequest) (*ListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSandboxes not implemented")
@@ -178,6 +196,24 @@ func _FastPathService_DeleteSandbox_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FastPathService_UpdateSandbox_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FastPathServiceServer).UpdateSandbox(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FastPathService_UpdateSandbox_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FastPathServiceServer).UpdateSandbox(ctx, req.(*UpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _FastPathService_ListSandboxes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListRequest)
 	if err := dec(in); err != nil {
@@ -228,6 +264,10 @@ var FastPathService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSandbox",
 			Handler:    _FastPathService_DeleteSandbox_Handler,
+		},
+		{
+			MethodName: "UpdateSandbox",
+			Handler:    _FastPathService_UpdateSandbox_Handler,
 		},
 		{
 			MethodName: "ListSandboxes",

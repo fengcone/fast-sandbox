@@ -212,3 +212,88 @@ func (s *Server) DeleteSandbox(ctx context.Context, req *fastpathv1.DeleteReques
 	}
 	return &fastpathv1.DeleteResponse{Success: true}, nil
 }
+
+func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateRequest) (*fastpathv1.UpdateResponse, error) {
+	var sb apiv1alpha1.Sandbox
+	if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, &sb); err != nil {
+		return &fastpathv1.UpdateResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to get sandbox: %v", err),
+		}, nil
+	}
+
+	// 使用 MergePatch 进行更新
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, latest); err != nil {
+			return err
+		}
+
+		// 应用更新
+		switch v := req.Update.(type) {
+		case *fastpathv1.UpdateRequest_ExpireTimeSeconds:
+			if v.ExpireTimeSeconds == 0 {
+				latest.Spec.ExpireTime = nil // 移除过期时间
+			} else {
+				t := metav1.NewTime(time.Unix(v.ExpireTimeSeconds, 0))
+				latest.Spec.ExpireTime = &t
+			}
+		case *fastpathv1.UpdateRequest_ResetRevision:
+			// 解析 ISO8601 时间戳
+			t, err := time.Parse(time.RFC3339Nano, v.ResetRevision)
+			if err != nil {
+				return fmt.Errorf("invalid reset_revision format: %v", err)
+			}
+			latest.Spec.ResetRevision = &metav1.Time{Time: t}
+		case *fastpathv1.UpdateRequest_FailurePolicy:
+			latest.Spec.FailurePolicy = toFailurePolicy(v.FailurePolicy)
+		case *fastpathv1.UpdateRequest_RecoveryTimeoutSeconds:
+			latest.Spec.RecoveryTimeoutSeconds = v.RecoveryTimeoutSeconds
+		}
+
+		// 更新标签
+		if len(req.Labels) > 0 {
+			if latest.Labels == nil {
+				latest.Labels = make(map[string]string)
+			}
+			for k, v := range req.Labels {
+				latest.Labels[k] = v
+			}
+		}
+
+		return s.K8sClient.Update(ctx, latest)
+	})
+
+	if err != nil {
+		return &fastpathv1.UpdateResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to update sandbox: %v", err),
+		}, nil
+	}
+
+	// 重新获取更新后的状态用于返回
+	s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, &sb)
+
+	return &fastpathv1.UpdateResponse{
+		Success: true,
+		Message: "sandbox updated successfully",
+		Sandbox: &fastpathv1.SandboxInfo{
+			SandboxId: sb.Name,
+			Phase:     sb.Status.Phase,
+			AgentPod:  sb.Status.AssignedPod,
+			Endpoints: sb.Status.Endpoints,
+			Image:     sb.Spec.Image,
+			PoolRef:   sb.Spec.PoolRef,
+			CreatedAt: sb.CreationTimestamp.Unix(),
+		},
+	}, nil
+}
+
+func toFailurePolicy(fp fastpathv1.FailurePolicy) apiv1alpha1.FailurePolicy {
+	switch fp {
+	case fastpathv1.FailurePolicy_AUTO_RECREATE:
+		return apiv1alpha1.FailurePolicyAutoRecreate
+	default:
+		return apiv1alpha1.FailurePolicyManual
+	}
+}
