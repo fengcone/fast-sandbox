@@ -50,6 +50,10 @@ spec:
 EOF
     wait_for_pod "fast-sandbox.io/pool=$POOL" 60 "$TEST_NS"
 
+    # 等待 Agent 心跳同步到 Controller（确保容量信息已更新）
+    echo "  等待 Agent 心跳同步..."
+    sleep 3
+
     # 建立 Controller port-forward
     CTRL_NS=$(kubectl get deployment fast-sandbox-controller -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "default")
     kubectl port-forward deployment/fast-sandbox-controller -n "$CTRL_NS" 9090:9090 >/dev/null 2>&1 &
@@ -85,8 +89,8 @@ EOF
     # === Test 2: 使用缓存创建 Sandbox ===
     echo "  测试 2: 使用缓存配置创建 Sandbox"
 
-    # 使用 -f 参数指定缓存文件来创建
-    OUTPUT=$("$CLIENT_BIN" run "$SB_NAME" -f "$CACHE_FILE" 2>&1)
+    # 使用 -f 参数指定缓存文件来创建（需要指定 namespace）
+    OUTPUT=$("$CLIENT_BIN" run "$SB_NAME" -f "$CACHE_FILE" --namespace "$TEST_NS" 2>&1)
     if echo "$OUTPUT" | grep -q "Sandbox created successfully"; then
         echo "  ✓ Sandbox 创建成功"
     else
@@ -118,6 +122,19 @@ EOF
 
     # === Test 5: 缓存不存在时应使用默认模板 ===
     echo "  测试 5: 缓存不存在时的默认行为"
+
+    # 先删除第一个 Sandbox 以释放插槽
+    echo "  删除第一个 Sandbox 释放插槽..."
+    "$CLIENT_BIN" delete "$SB_NAME" --namespace "$TEST_NS" >/dev/null 2>&1
+    # 等待删除完成
+    for i in {1..15}; do
+        if ! kubectl get sandbox "$SB_NAME" -n "$TEST_NS" >/dev/null 2>&1; then
+            echo "  ✓ 第一个 Sandbox 已删除"
+            break
+        fi
+        sleep 1
+    done
+
     # 验证默认模板的关键字段
     DEFAULT_TEMPLATE_TEST="$CACHE_DIR/default-test.yaml"
     cat > "$DEFAULT_TEMPLATE_TEST" <<EOF
@@ -129,7 +146,7 @@ EOF
 
     # 使用新配置创建
     SB_NAME2="sb-cache-default-$RANDOM"
-    OUTPUT=$("$CLIENT_BIN" run "$SB_NAME2" -f "$DEFAULT_TEMPLATE_TEST" 2>&1)
+    OUTPUT=$("$CLIENT_BIN" run "$SB_NAME2" -f "$DEFAULT_TEMPLATE_TEST" --namespace "$TEST_NS" 2>&1)
     if echo "$OUTPUT" | grep -q "Sandbox created successfully"; then
         echo "  ✓ 使用默认配置创建成功"
     else

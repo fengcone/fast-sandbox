@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	updateExpireTime     string
-	updateFailurePolicy  string
+	updateExpireTime      string
+	updateFailurePolicy   string
 	updateRecoveryTimeout int32
-	updateLabels         []string
+	updateLabels          []string
 )
 
 // updateCmd represents the update command

@@ -5,15 +5,18 @@ metadata:
   namespace: default
   labels:
     control-plane: controller-manager
+    app: fast-sandbox-controller
 spec:
   replicas: 1
   selector:
     matchLabels:
       control-plane: controller-manager
+      app: fast-sandbox-controller
   template:
     metadata:
       labels:
         control-plane: controller-manager
+        app: fast-sandbox-controller
     spec:
       serviceAccountName: fast-sandbox-manager-role
       containers:

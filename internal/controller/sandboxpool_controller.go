@@ -56,7 +56,7 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 		}
 	}
-	logger.Info("Load statistics", "pool", pool.Name, "active", activeCount, "pending", pendingCount)
+	//logger.Info("Load statistics", "pool", pool.Name, "active", activeCount, "pending", pendingCount)
 
 	// 3. 动态计算所需 Pod 数量
 	maxPerPod := getAgentCapacity(&pool)
@@ -77,7 +77,7 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	currentCount := int32(len(childPods.Items))
-	logger.Info("Scaling analysis", "pool", pool.Name, "current", currentCount, "desired", desiredPods)
+	//logger.Info("Scaling analysis", "pool", pool.Name, "current", currentCount, "desired", desiredPods)
 
 	// 5. 执行扩缩容
 	if currentCount < desiredPods {

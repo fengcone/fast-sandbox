@@ -24,6 +24,43 @@ const (
 	FailurePolicyAutoRecreate FailurePolicy = "AutoRecreate"
 )
 
+// SandboxPhase defines the lifecycle phase of a Sandbox in the Controller.
+// +kubebuilder:validation:Enum=Pending;Bound;Running;Terminating;Expired;Failed;Lost
+type SandboxPhase string
+
+const (
+	// PhasePending - Sandbox has been scheduled to an Agent but container not yet created.
+	PhasePending SandboxPhase = "Pending"
+	// PhaseBound - Container creation request sent to Agent, waiting for confirmation.
+	PhaseBound SandboxPhase = "Bound"
+	// PhaseRunning - Container is running on the Agent (synced from Agent status).
+	PhaseRunning SandboxPhase = "Running"
+	// PhaseTerminating - Sandbox is being deleted, waiting for Agent to confirm cleanup.
+	PhaseTerminating SandboxPhase = "Terminating"
+	// PhaseExpired - Sandbox has expired, runtime resources cleaned but CRD preserved.
+	PhaseExpired SandboxPhase = "Expired"
+	// PhaseFailed - Sandbox creation or operation failed.
+	PhaseFailed SandboxPhase = "Failed"
+	// PhaseLost - Agent Pod was lost under Manual failure policy, waiting for user intervention.
+	PhaseLost SandboxPhase = "Lost"
+)
+
+// AgentSandboxPhase defines the lifecycle phase reported by the Agent.
+type AgentSandboxPhase string
+
+const (
+	// AgentPhaseCreating - Agent is creating the container.
+	AgentPhaseCreating AgentSandboxPhase = "creating"
+	// AgentPhaseRunning - Container is running.
+	AgentPhaseRunning AgentSandboxPhase = "running"
+	// AgentPhaseStopped - Container has stopped.
+	AgentPhaseStopped AgentSandboxPhase = "stopped"
+	// AgentPhaseFailed - Container creation or execution failed.
+	AgentPhaseFailed AgentSandboxPhase = "failed"
+	// AgentPhaseTerminated - Container has been deleted and cleaned up.
+	AgentPhaseTerminated AgentSandboxPhase = "terminated"
+)
+
 // SandboxSpec defines the desired state of Sandbox.
 type SandboxSpec struct {
 	Image      string          `json:"image"`

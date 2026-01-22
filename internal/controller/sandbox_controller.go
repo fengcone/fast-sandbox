@@ -16,8 +16,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// Constants for controller configuration
+const (
+	// FinalizerName is the finalizer used to ensure cleanup before deletion
+	FinalizerName = "sandbox.fast.io/cleanup"
+
+	// HeartbeatTimeout is the duration after which an agent is considered unhealthy
+	HeartbeatTimeout = 10 * time.Second
+
+	// DefaultRequeueInterval is the default interval for periodic reconciliation
+	DefaultRequeueInterval = 5 * time.Second
+
+	// DeletionPollInterval is the interval for polling deletion status
+	DeletionPollInterval = 2 * time.Second
+
+	// ExpirationCheckThreshold is the threshold for scheduling expiration check
+	ExpirationCheckThreshold = 30 * time.Second
+)
+
+// SandboxReconciler reconciles a Sandbox object
 type SandboxReconciler struct {
 	client.Client
 	Scheme      *runtime.Scheme
@@ -26,291 +46,516 @@ type SandboxReconciler struct {
 	AgentClient api.AgentAPIClient
 }
 
+// Reconcile is the main entry point for the Sandbox controller.
+// It implements a state machine pattern for managing Sandbox lifecycle.
 func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Fetch the Sandbox instance
 	var sandbox apiv1alpha1.Sandbox
 	if err := r.Get(ctx, req.NamespacedName, &sandbox); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if sandbox has expired (only if not being deleted)
-	// 如果有 deletionTimestamp，优先处理 finalizer，跳过过期检查
-	if sandbox.ObjectMeta.DeletionTimestamp == nil && sandbox.Spec.ExpireTime != nil && !sandbox.Spec.ExpireTime.IsZero() {
-		if time.Now().After(sandbox.Spec.ExpireTime.Time) {
-			// Sandbox has expired - soft delete: remove runtime but keep CRD for history
-			if sandbox.Status.Phase != "Expired" {
-				// 1. Delete the underlying sandbox from Agent
-				if sandbox.Status.AssignedPod != "" {
-					if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
-						return ctrl.Result{}, fmt.Errorf("failed to delete sandbox from agent: %w", err)
-					}
-					r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
-				}
-
-				// 2. Update CRD status to "Expired" (keep CRD for history)
-				err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-					latest := &apiv1alpha1.Sandbox{}
-					if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-						return err
-					}
-					latest.Status.Phase = "Expired"
-					latest.Status.AssignedPod = ""
-					latest.Status.SandboxID = ""
-					return r.Status().Update(ctx, latest)
-				})
-				return ctrl.Result{}, err
-			}
-			// Already expired, no need to requeue
-			return ctrl.Result{}, nil
-		}
-		// Not expired yet, requeue after the remaining time
-		remainingTime := time.Until(sandbox.Spec.ExpireTime.Time)
-		if remainingTime > 0 && remainingTime < 30*time.Second {
-			// Requeue before expiration to check again
-			return ctrl.Result{RequeueAfter: remainingTime}, nil
-		}
+	// Step 1: Ensure Finalizer is present
+	if err := r.ensureFinalizer(ctx, &sandbox); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	finalizerName := "sandbox.fast.io/cleanup"
-	if sandbox.ObjectMeta.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
-			// Expired 状态：底层 sandbox 已删除，直接移除 finalizer
-			if sandbox.Status.Phase == "Expired" {
-				err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-					latest := &apiv1alpha1.Sandbox{}
-					if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-						return err
-					}
-					controllerutil.RemoveFinalizer(latest, finalizerName)
-					return r.Update(ctx, latest)
-				})
-				return ctrl.Result{}, err
-			}
+	// Step 2: Handle Deletion (if DeletionTimestamp is set)
+	if sandbox.DeletionTimestamp != nil {
+		return r.handleDeletion(ctx, &sandbox)
+	}
 
-			// 异步删除流程：Terminating → terminated → remove finalizer
-			if sandbox.Status.Phase == "Terminating" || sandbox.Status.Phase == "Bound" {
-				agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-				if !ok {
-					// Agent 不存在，直接清理 finalizer
-					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-						latest := &apiv1alpha1.Sandbox{}
-						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-							return err
-						}
-						controllerutil.RemoveFinalizer(latest, finalizerName)
-						return r.Update(ctx, latest)
-					})
-					return ctrl.Result{}, err
-				}
+	// Step 3: Handle Expiration (before other operations)
+	if result, err, done := r.handleExpiration(ctx, &sandbox); done {
+		return result, err
+	}
 
-				// 检查 agent 上报的状态
-				agentStatus, hasStatus := agent.SandboxStatuses[sandbox.Name]
+	// Step 4: Handle Reset Request
+	if result, err, done := r.handleReset(ctx, &sandbox); done {
+		return result, err
+	}
 
-				// 第一次进入删除流程，调用 agent 删除（异步）
-				if sandbox.Status.Phase == "Bound" {
-					if err := r.deleteFromAgent(ctx, &sandbox); err != nil {
-						// Agent 删除调用失败，重试
-						return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
-					}
-					// 标记为 Terminating
-					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-						latest := &apiv1alpha1.Sandbox{}
-						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-							return err
-						}
-						latest.Status.Phase = "Terminating"
-						return r.Status().Update(ctx, latest)
-					})
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-					// Requeue 等待下次检查
-					return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-				}
+	// Step 5: Main State Machine - reconcile based on current phase
+	return r.reconcilePhase(ctx, &sandbox)
+}
 
-				// 已经是 Terminating 状态，检查 agent 是否完成删除
-				if hasStatus && agentStatus.Phase == "terminated" {
-					// Agent 已完成删除，释放资源并移除 finalizer
-					r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
-					err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-						latest := &apiv1alpha1.Sandbox{}
-						if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-							return err
-						}
-						controllerutil.RemoveFinalizer(latest, finalizerName)
-						return r.Update(ctx, latest)
-					})
-					return ctrl.Result{}, err
-				}
+// ============================================================================
+// Finalizer Management
+// ============================================================================
 
-				// 仍在 terminating 中，继续等待
-				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-			}
-
-			// Phase 不是 Bound/Terminating，直接清理
-			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-					return err
-				}
-				controllerutil.RemoveFinalizer(latest, finalizerName)
-				return r.Update(ctx, latest)
-			})
-			return ctrl.Result{}, err
+// ensureFinalizer ensures the cleanup finalizer is present on the Sandbox.
+func (r *SandboxReconciler) ensureFinalizer(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	if controllerutil.ContainsFinalizer(sandbox, FinalizerName) {
+		return nil
+	}
+	if sandbox.DeletionTimestamp != nil {
+		return nil
+	}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
 		}
+		controllerutil.AddFinalizer(latest, FinalizerName)
+		return r.Update(ctx, latest)
+	})
+
+	return err
+}
+
+// ============================================================================
+// Deletion State Machine
+// ============================================================================
+
+// handleDeletion processes the Sandbox deletion workflow.
+// State transitions: Bound/Running → Terminating → (Agent confirms) → Removed
+func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if !controllerutil.ContainsFinalizer(sandbox, FinalizerName) {
 		return ctrl.Result{}, nil
 	}
 
-	if !controllerutil.ContainsFinalizer(&sandbox, finalizerName) {
-		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			latest := &apiv1alpha1.Sandbox{}
-			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-				return err
-			}
-			controllerutil.AddFinalizer(latest, finalizerName)
-			return r.Update(ctx, latest)
-		})
-		return ctrl.Result{Requeue: true}, err
-	}
+	phase := apiv1alpha1.SandboxPhase(sandbox.Status.Phase)
 
-	if sandbox.Spec.ResetRevision != nil && !sandbox.Spec.ResetRevision.IsZero() {
-		if sandbox.Status.AcceptedResetRevision == nil || sandbox.Spec.ResetRevision.After(sandbox.Status.AcceptedResetRevision.Time) {
-			if sandbox.Status.AssignedPod != "" {
-				r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), &sandbox)
-			}
-			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-					return err
-				}
-				latest.Status.AssignedPod = ""
-				latest.Status.Phase = "Pending"
-				latest.Status.AcceptedResetRevision = sandbox.Spec.ResetRevision
-				return r.Status().Update(ctx, latest)
-			})
-			return ctrl.Result{Requeue: true}, err
-		}
-	}
+	switch phase {
+	case apiv1alpha1.PhaseExpired:
+		// Already expired - runtime resources are already cleaned, just remove finalizer
+		logger.V(1).Info("Removing finalizer for expired sandbox")
+		return r.removeFinalizer(ctx, sandbox)
 
-	if sandbox.Status.AssignedPod == "" {
-		return r.handleScheduling(ctx, &sandbox)
-	}
+	case apiv1alpha1.PhaseBound, apiv1alpha1.PhaseRunning:
+		// Active sandbox - need to cleanup Agent resources
+		return r.handleActiveDeletion(ctx, sandbox)
 
-	agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok {
-		// Agent 不存在（被删除或心跳超时清理）
-		// 根据 failurePolicy 决定是否重新调度
-		if sandbox.Spec.FailurePolicy == apiv1alpha1.FailurePolicyAutoRecreate {
-			// AutoRecreate 模式：立即清空 assignedPod 触发重新调度
-			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-					return err
-				}
-				// 只有在 assignedPod 没有变化时才执行（避免竞争）
-				if latest.Status.AssignedPod == sandbox.Status.AssignedPod {
-					latest.Status.AssignedPod = ""
-					latest.Status.Phase = "Pending"
-					latest.Status.SandboxID = ""
-					return r.Status().Update(ctx, latest)
-				}
-				return nil
-			})
-			return ctrl.Result{Requeue: true}, err
-		}
-		// Manual 模式：保持当前状态，不自动重新调度
-		// 只是等待用户手动干预（更新 resetRevision）
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
+	case apiv1alpha1.PhaseTerminating:
+		// Already terminating - wait for Agent confirmation
+		return r.handleTerminatingDeletion(ctx, sandbox)
 
-	// 检查心跳超时
-	heartbeatAge := time.Since(agent.LastHeartbeat)
-	if heartbeatAge < 10*time.Second {
-		// 心跳正常
-		if sandbox.Status.Phase == "Pending" || sandbox.Status.Phase == "" {
-			if err := r.handleCreateOnAgent(ctx, &sandbox); err != nil {
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-			}
-			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-					return err
-				}
-				latest.Status.Phase = "Bound"
-				return r.Status().Update(ctx, latest)
-			})
-			return ctrl.Result{Requeue: true}, err
-		}
-		if err := r.updateStatusFromRegistry(ctx, &sandbox); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	default:
+		// Pending, Failed, or unknown phase - no Agent resources to cleanup
+		logger.V(1).Info("Removing finalizer for sandbox without Agent resources", "phase", phase)
+		return r.removeFinalizer(ctx, sandbox)
 	}
-
-	// 心跳超时但 Agent 仍在 Registry 中（Agent 进程可能挂了但 Pod 还在）
-	// 等待 AgentControlLoop 的 CleanupStaleAgents（5分钟）清理后触发 AutoRecreate
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	agent, err := r.Registry.Allocate(sandbox)
-	if err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+// handleActiveDeletion handles deletion of an active (Bound/Running) sandbox.
+func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Check if Agent exists
+	if sandbox.Status.AssignedPod == "" {
+		logger.V(1).Info("No assigned pod, removing finalizer directly")
+		return r.removeFinalizer(ctx, sandbox)
 	}
 
+	_, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !agentExists {
+		// Agent doesn't exist - skip Agent cleanup, just remove finalizer
+		logger.Info("Agent not found in registry, removing finalizer", "agent", sandbox.Status.AssignedPod)
+		return r.removeFinalizer(ctx, sandbox)
+	}
+
+	// Call Agent to delete the sandbox
+	if err := r.deleteFromAgent(ctx, sandbox); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete from agent: %w", err)
+	}
+
+	// Transition to Terminating phase
+	if err := r.updatePhase(ctx, sandbox, apiv1alpha1.PhaseTerminating); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Sandbox deletion initiated, transitioning to Terminating")
+	return ctrl.Result{RequeueAfter: DeletionPollInterval}, nil
+}
+
+// handleTerminatingDeletion handles a sandbox in Terminating phase.
+func (r *SandboxReconciler) handleTerminatingDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Check if Agent still exists
+	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !agentExists {
+		// Agent gone - assume cleanup is complete
+		logger.Info("Agent disappeared during termination, completing cleanup")
+		return r.removeFinalizer(ctx, sandbox)
+	}
+
+	// Check Agent-reported status
+	agentStatus, hasStatus := agent.SandboxStatuses[sandbox.Name]
+	if hasStatus && apiv1alpha1.AgentSandboxPhase(agentStatus.Phase) == apiv1alpha1.AgentPhaseTerminated {
+		// Agent confirmed deletion - release resources and remove finalizer
+		logger.Info("Agent confirmed sandbox terminated")
+		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
+		return r.removeFinalizer(ctx, sandbox)
+	}
+
+	// Still terminating - continue waiting
+	logger.V(1).Info("Waiting for Agent to confirm termination")
+	return ctrl.Result{RequeueAfter: DeletionPollInterval}, nil
+}
+
+// removeFinalizer removes the cleanup finalizer from the Sandbox.
+func (r *SandboxReconciler) removeFinalizer(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		controllerutil.RemoveFinalizer(latest, FinalizerName)
+		return r.Update(ctx, latest)
+	})
+	return ctrl.Result{}, err
+}
+
+// ============================================================================
+// Expiration Handling
+// ============================================================================
+
+// handleExpiration checks and processes sandbox expiration.
+// Returns (result, error, done) where done=true means the sandbox was expired/processed.
+func (r *SandboxReconciler) handleExpiration(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error, bool) {
+	// Skip if no expiration time set
+	if sandbox.Spec.ExpireTime == nil || sandbox.Spec.ExpireTime.IsZero() {
+		return ctrl.Result{}, nil, false
+	}
+
+	// Already expired - nothing to do
+	if apiv1alpha1.SandboxPhase(sandbox.Status.Phase) == apiv1alpha1.PhaseExpired {
+		return ctrl.Result{}, nil, true
+	}
+
+	now := time.Now()
+	expireTime := sandbox.Spec.ExpireTime.Time
+
+	if now.After(expireTime) {
+		// Sandbox has expired - clean up runtime but keep CRD
+		return r.processExpiration(ctx, sandbox)
+	}
+
+	// Schedule requeue before expiration if within threshold
+	remaining := time.Until(expireTime)
+	if remaining > 0 && remaining < ExpirationCheckThreshold {
+		return ctrl.Result{RequeueAfter: remaining}, nil, true
+	}
+
+	return ctrl.Result{}, nil, false
+}
+
+// processExpiration cleans up an expired sandbox.
+func (r *SandboxReconciler) processExpiration(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error, bool) {
+	logger := log.FromContext(ctx)
+	logger.Info("Processing sandbox expiration")
+
+	// Delete runtime from Agent if assigned
+	if sandbox.Status.AssignedPod != "" {
+		if err := r.deleteFromAgent(ctx, sandbox); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to delete expired sandbox from agent: %w", err), true
+		}
+		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
+	}
+
+	// Update status to Expired
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		latest.Status.Phase = string(apiv1alpha1.PhaseExpired)
+		latest.Status.AssignedPod = ""
+		latest.Status.SandboxID = ""
+		return r.Status().Update(ctx, latest)
+	})
+
+	logger.Info("Sandbox expired and cleaned up")
+	return ctrl.Result{}, err, true
+}
+
+// ============================================================================
+// Reset Handling
+// ============================================================================
+
+// handleReset processes reset requests triggered by ResetRevision changes.
+// Returns (result, error, done) where done=true means reset was processed.
+func (r *SandboxReconciler) handleReset(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error, bool) {
+	// Skip if no reset revision set
+	if sandbox.Spec.ResetRevision == nil || sandbox.Spec.ResetRevision.IsZero() {
+		return ctrl.Result{}, nil, false
+	}
+
+	// Skip if already processed
+	if sandbox.Status.AcceptedResetRevision != nil &&
+		!sandbox.Spec.ResetRevision.After(sandbox.Status.AcceptedResetRevision.Time) {
+		return ctrl.Result{}, nil, false
+	}
+
+	logger := log.FromContext(ctx)
+	logger.Info("Processing reset request")
+
+	// Clean up existing Agent resources
+	if sandbox.Status.AssignedPod != "" {
+		// Delete from Agent first (fix for BUG-03)
+		if err := r.deleteFromAgent(ctx, sandbox); err != nil {
+			// Log but don't block - reset takes priority
+			logger.Error(err, "Failed to delete old sandbox from agent during reset")
+		}
+		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
+	}
+
+	// Reset status to Pending for rescheduling
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		latest.Status.AssignedPod = ""
+		latest.Status.SandboxID = ""
+		latest.Status.Phase = string(apiv1alpha1.PhasePending)
+		latest.Status.AcceptedResetRevision = sandbox.Spec.ResetRevision
+		return r.Status().Update(ctx, latest)
+	})
+
+	logger.Info("Sandbox reset complete, pending rescheduling")
+	return ctrl.Result{Requeue: true}, err, true
+}
+
+// ============================================================================
+// Main State Machine
+// ============================================================================
+
+// reconcilePhase routes to the appropriate handler based on current phase.
+func (r *SandboxReconciler) reconcilePhase(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	phase := apiv1alpha1.SandboxPhase(sandbox.Status.Phase)
+
+	switch phase {
+	case "", apiv1alpha1.PhasePending:
+		return r.reconcilePending(ctx, sandbox)
+
+	case apiv1alpha1.PhaseBound, apiv1alpha1.PhaseRunning:
+		return r.reconcileRunning(ctx, sandbox)
+
+	case apiv1alpha1.PhaseExpired:
+		// Expired sandboxes are kept for history, no action needed
+		return ctrl.Result{}, nil
+
+	case apiv1alpha1.PhaseFailed:
+		// Failed sandboxes need manual intervention
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+
+	case apiv1alpha1.PhaseLost:
+		// Lost phase - Agent was lost under Manual policy, waiting for user intervention
+		// Check if a new Agent is available for rescheduling
+		return r.reconcileLost(ctx, sandbox)
+
+	default:
+		// Unknown phase - requeue for later
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	}
+}
+
+// reconcilePending handles sandboxes in Pending phase.
+// Workflow: Schedule → Create on Agent → Transition to Bound
+func (r *SandboxReconciler) reconcilePending(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Step 1: Scheduling (if not yet assigned)
+	if sandbox.Status.AssignedPod == "" {
+		return r.handleScheduling(ctx, sandbox)
+	}
+
+	// Step 2: Validate Agent availability
+	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !agentExists {
+		return r.handleAgentLost(ctx, sandbox)
+	}
+
+	// Step 3: Check Agent heartbeat
+	heartbeatAge := time.Since(agent.LastHeartbeat)
+	if heartbeatAge >= HeartbeatTimeout {
+		logger.V(1).Info("Agent heartbeat timeout, waiting for cleanup", "age", heartbeatAge)
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	}
+
+	// Step 4: Create sandbox on Agent
+	if err := r.handleCreateOnAgent(ctx, sandbox); err != nil {
+		logger.Error(err, "Failed to create sandbox on agent")
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	}
+
+	// Step 5: Transition to Bound
+	if err := r.updatePhase(ctx, sandbox, apiv1alpha1.PhaseBound); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Sandbox created on agent, transitioning to Bound")
+	return ctrl.Result{Requeue: true}, nil
+}
+
+// reconcileRunning handles sandboxes in Bound/Running phase.
+// Workflow: Sync status from Agent, handle Agent loss
+func (r *SandboxReconciler) reconcileRunning(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Validate Agent exists
+	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !agentExists {
+		return r.handleAgentLost(ctx, sandbox)
+	}
+
+	// Check heartbeat
+	heartbeatAge := time.Since(agent.LastHeartbeat)
+	if heartbeatAge >= HeartbeatTimeout {
+		logger.V(1).Info("Agent heartbeat timeout, waiting for cleanup", "age", heartbeatAge)
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	}
+
+	// Sync status from Agent
+	if err := r.syncStatusFromAgent(ctx, sandbox, &agent); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+// reconcileLost handles sandboxes in Lost phase.
+// Workflow: Wait for new Agent to become available, then transition to Pending for rescheduling.
+func (r *SandboxReconciler) reconcileLost(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Check if any Agent is available for the sandbox's pool
+	agent, err := r.Registry.Allocate(sandbox)
+	if err != nil {
+		// No agent available yet, continue waiting
+		logger.V(1).Info("Waiting for available agent for rescheduling", "error", err)
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	}
+
+	// Agent available - transition to Pending for rescheduling
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &apiv1alpha1.Sandbox{}
 		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
 			return err
 		}
-		if latest.Status.AssignedPod != "" {
-			return fmt.Errorf("race")
+		// Guard against concurrent updates
+		if latest.Status.Phase != string(apiv1alpha1.PhaseLost) {
+			return fmt.Errorf("sandbox phase changed from Lost, aborting reschedule")
 		}
 		latest.Status.AssignedPod = agent.PodName
 		latest.Status.NodeName = agent.NodeName
-		latest.Status.Phase = "Pending"
+		latest.Status.Phase = string(apiv1alpha1.PhasePending)
 		return r.Status().Update(ctx, latest)
 	})
+
 	if err != nil {
+		// Scheduling failed - release the allocation
 		r.Registry.Release(agent.ID, sandbox)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{}, err
 	}
+
+	logger.Info("Agent available for rescheduling, transitioning from Lost to Pending", "agent", agent.PodName)
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func (r *SandboxReconciler) updateStatusFromRegistry(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
-	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok {
-		return nil
+// ============================================================================
+// Scheduling
+// ============================================================================
+
+// handleScheduling allocates an Agent for the Sandbox.
+func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	agent, err := r.Registry.Allocate(sandbox)
+	if err != nil {
+		logger.V(1).Info("No available agent for scheduling", "error", err)
+		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 	}
-	if status, ok := agentInfo.SandboxStatuses[sandbox.Name]; ok {
-		if sandbox.Status.Phase != status.Phase || sandbox.Status.SandboxID != status.SandboxID {
-			return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &apiv1alpha1.Sandbox{}
-				if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
-					return err
-				}
-				latest.Status.Phase = status.Phase
-				latest.Status.SandboxID = status.SandboxID
-				if len(latest.Spec.ExposedPorts) > 0 && agentInfo.PodIP != "" {
-					var ep []string
-					for _, p := range latest.Spec.ExposedPorts {
-						ep = append(ep, fmt.Sprintf("%s:%d", agentInfo.PodIP, p))
-					}
-					latest.Status.Endpoints = ep
-				}
-				return r.Status().Update(ctx, latest)
-			})
+
+	// Update status with assignment
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
 		}
+		// Guard against concurrent scheduling
+		if latest.Status.AssignedPod != "" {
+			return fmt.Errorf("sandbox already scheduled to %s", latest.Status.AssignedPod)
+		}
+		latest.Status.AssignedPod = agent.PodName
+		latest.Status.NodeName = agent.NodeName
+		latest.Status.Phase = string(apiv1alpha1.PhasePending)
+		return r.Status().Update(ctx, latest)
+	})
+
+	if err != nil {
+		// Scheduling failed - release the allocation
+		r.Registry.Release(agent.ID, sandbox)
+		return ctrl.Result{Requeue: true}, nil
 	}
-	return nil
+
+	logger.Info("Sandbox scheduled to agent", "agent", agent.PodName, "node", agent.NodeName)
+	return ctrl.Result{Requeue: true}, nil
 }
 
-func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
-	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok {
-		return fmt.Errorf("no agent")
+// ============================================================================
+// Agent Interaction
+// ============================================================================
+
+// handleAgentLost handles the case when the assigned Agent is no longer available.
+func (r *SandboxReconciler) handleAgentLost(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Assigned agent lost", "agent", sandbox.Status.AssignedPod)
+
+	if sandbox.Spec.FailurePolicy == apiv1alpha1.FailurePolicyAutoRecreate {
+		// AutoRecreate: clear assignment and reschedule
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &apiv1alpha1.Sandbox{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+				return err
+			}
+			// Guard against concurrent updates
+			if latest.Status.AssignedPod != sandbox.Status.AssignedPod {
+				return nil // Another reconcile already handled this
+			}
+			latest.Status.AssignedPod = ""
+			latest.Status.SandboxID = ""
+			latest.Status.Phase = string(apiv1alpha1.PhasePending)
+			return r.Status().Update(ctx, latest)
+		})
+
+		logger.Info("Agent lost - triggering AutoRecreate")
+		return ctrl.Result{Requeue: true}, err
 	}
-	_, err := r.AgentClient.CreateSandbox(fmt.Sprintf("%s:8081", agentInfo.PodIP), &api.CreateSandboxRequest{
+
+	// Manual policy: transition to Lost phase to explicitly indicate agent loss
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		// Guard against concurrent updates
+		if latest.Status.Phase == string(apiv1alpha1.PhaseLost) {
+			return nil // Already in Lost phase
+		}
+		latest.Status.Phase = string(apiv1alpha1.PhaseLost)
+		latest.Status.AssignedPod = ""
+		latest.Status.SandboxID = ""
+		return r.Status().Update(ctx, latest)
+	})
+
+	logger.Info("Agent lost - Manual policy, transitioning to Lost phase")
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, err
+}
+
+// handleCreateOnAgent sends a create request to the Agent.
+func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !ok {
+		return fmt.Errorf("agent %s not found in registry", sandbox.Status.AssignedPod)
+	}
+
+	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
+	_, err := r.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  sandbox.Name,
 			ClaimName:  sandbox.Name,
@@ -321,43 +566,157 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 			WorkingDir: sandbox.Spec.WorkingDir,
 		},
 	})
+
 	return err
+}
+
+// deleteFromAgent sends a delete request to the Agent.
+func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	if !ok {
+		// Agent not found - nothing to delete
+		return nil
+	}
+
+	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
+	_, err := r.AgentClient.DeleteSandbox(endpoint, &api.DeleteSandboxRequest{
+		SandboxID: sandbox.Name,
+	})
+
+	return err
+}
+
+// syncStatusFromAgent synchronizes sandbox status from Agent's reported status.
+func (r *SandboxReconciler) syncStatusFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo) error {
+	status, hasStatus := agent.SandboxStatuses[sandbox.Name]
+	if !hasStatus {
+		return nil
+	}
+
+	// Map Agent phase to Controller phase
+	controllerPhase := mapAgentPhaseToController(status.Phase)
+
+	// Check if update is needed
+	if sandbox.Status.Phase == string(controllerPhase) && sandbox.Status.SandboxID == status.SandboxID {
+		return nil
+	}
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+
+		latest.Status.Phase = string(controllerPhase)
+		latest.Status.SandboxID = status.SandboxID
+
+		// Update endpoints if ports are exposed
+		if len(latest.Spec.ExposedPorts) > 0 && agent.PodIP != "" {
+			endpoints := make([]string, 0, len(latest.Spec.ExposedPorts))
+			for _, port := range latest.Spec.ExposedPorts {
+				endpoints = append(endpoints, fmt.Sprintf("%s:%d", agent.PodIP, port))
+			}
+			latest.Status.Endpoints = endpoints
+		}
+
+		return r.Status().Update(ctx, latest)
+	})
+}
+
+// mapAgentPhaseToController maps Agent-reported phase to Controller standard phase.
+// Agent uses lowercase (running, terminated), Controller uses TitleCase (Running, Terminated).
+func mapAgentPhaseToController(agentPhase string) apiv1alpha1.SandboxPhase {
+	switch apiv1alpha1.AgentSandboxPhase(agentPhase) {
+	case apiv1alpha1.AgentPhaseRunning:
+		return apiv1alpha1.PhaseRunning
+	case apiv1alpha1.AgentPhaseCreating:
+		return apiv1alpha1.PhaseBound // Still creating, keep as Bound
+	case apiv1alpha1.AgentPhaseFailed:
+		return apiv1alpha1.PhaseFailed
+	case apiv1alpha1.AgentPhaseStopped:
+		return apiv1alpha1.PhaseFailed // Stopped unexpectedly
+	case apiv1alpha1.AgentPhaseTerminated:
+		return apiv1alpha1.PhaseTerminating // Being deleted
+	default:
+		// Unknown phase - return as-is converted to SandboxPhase
+		// This handles any future phases gracefully
+		return apiv1alpha1.SandboxPhase(agentPhase)
+	}
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+// updatePhase updates the sandbox phase.
+func (r *SandboxReconciler) updatePhase(ctx context.Context, sandbox *apiv1alpha1.Sandbox, phase apiv1alpha1.SandboxPhase) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		latest.Status.Phase = string(phase)
+		return r.Status().Update(ctx, latest)
+	})
 }
 
 // envVarToMap converts K8s EnvVar slice to map[string]string
 func envVarToMap(envs []corev1.EnvVar) map[string]string {
-	result := make(map[string]string)
+	result := make(map[string]string, len(envs))
 	for _, e := range envs {
 		result[e.Name] = e.Value
 	}
 	return result
 }
 
-func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
-	agentInfo, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
-	if !ok {
-		return nil
+// ============================================================================
+// Controller Setup
+// ============================================================================
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Create index for efficient lookup of unassigned sandboxes
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&apiv1alpha1.Sandbox{},
+		"status.assignedPod",
+		func(o client.Object) []string {
+			return []string{o.(*apiv1alpha1.Sandbox).Status.AssignedPod}
+		},
+	); err != nil {
+		return err
 	}
-	_, err := r.AgentClient.DeleteSandbox(fmt.Sprintf("%s:8081", agentInfo.PodIP), &api.DeleteSandboxRequest{SandboxID: sandbox.Name})
-	return err
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&apiv1alpha1.Sandbox{}).
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPodToSandboxes),
+		).
+		Complete(r)
 }
 
-func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1alpha1.Sandbox{}, "status.assignedPod", func(o client.Object) []string {
-		return []string{o.(*apiv1alpha1.Sandbox).Status.AssignedPod}
-	})
-	return ctrl.NewControllerManagedBy(mgr).For(&apiv1alpha1.Sandbox{}).
-		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []ctrl.Request {
-			pod := o.(*corev1.Pod)
-			if pod.Labels["app"] != "sandbox-agent" || pod.Status.Phase != corev1.PodRunning {
-				return nil
-			}
-			var sbList apiv1alpha1.SandboxList
-			mgr.GetClient().List(ctx, &sbList, client.MatchingFields{"status.assignedPod": ""})
-			var reqs []ctrl.Request
-			for _, sb := range sbList.Items {
-				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&sb)})
-			}
-			return reqs
-		})).Complete(r)
+// mapPodToSandboxes returns reconcile requests for unassigned sandboxes when an agent pod becomes ready.
+func (r *SandboxReconciler) mapPodToSandboxes(ctx context.Context, obj client.Object) []ctrl.Request {
+	pod := obj.(*corev1.Pod)
+
+	// Only trigger for running agent pods
+	if pod.Labels["app"] != "sandbox-agent" || pod.Status.Phase != corev1.PodRunning {
+		return nil
+	}
+
+	// Request reconciliation for all unassigned sandboxes
+	var sandboxList apiv1alpha1.SandboxList
+	if err := r.List(ctx, &sandboxList, client.MatchingFields{"status.assignedPod": ""}); err != nil {
+		return nil
+	}
+
+	requests := make([]ctrl.Request, 0, len(sandboxList.Items))
+	for _, sb := range sandboxList.Items {
+		requests = append(requests, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(&sb),
+		})
+	}
+
+	return requests
 }

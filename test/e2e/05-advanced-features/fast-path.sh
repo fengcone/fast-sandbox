@@ -105,7 +105,7 @@ EOF
         SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         sleep 5
         PHASE=$(kubectl get sandbox "$SB_ID" -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        if [ "$PHASE" = "Bound" ] || [ "$PHASE" = "running" ] || [ "$PHASE" = "Pending" ]; then
+        if [ "$PHASE" = "Bound" ] || [ "$PHASE" = "Running" ] || [ "$PHASE" = "Pending" ]; then
             echo "  ✓ Strong 模式状态正确: $PHASE"
         else
             echo "  ❌ Strong 模式状态错误: '$PHASE'"; kill $PF_PID; return 1

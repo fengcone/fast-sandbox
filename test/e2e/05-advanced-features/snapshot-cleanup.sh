@@ -120,7 +120,19 @@ EOF
             SUCCESS=false
             break
         fi
-        sleep 1
+
+        # 等待 Sandbox 完全删除（优雅关闭最多 10 秒，加上余量）
+        echo "  等待 Sandbox 完全删除..."
+        for j in {1..15}; do
+            if ! kubectl get sandbox "$SB_NAME2" -n "$TEST_NS" >/dev/null 2>&1; then
+                echo "  ✓ 循环第 $i 次: Sandbox 已删除"
+                break
+            fi
+            if [ $j -eq 15 ]; then
+                echo "  ⚠ 循环第 $i 次: 删除超时，但继续"
+            fi
+            sleep 1
+        done
     done
 
     if [ "$SUCCESS" = true ]; then

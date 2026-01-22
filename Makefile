@@ -69,11 +69,11 @@ docker-controller: build-controller-linux
 docker-janitor: build-janitor-linux
 	docker build -t $(JANITOR_IMAGE) -f build/Dockerfile.janitor .
 
-kind-load-agent:
+kind-load-agent: docker-agent
 	kind load docker-image $(AGENT_IMAGE) --name fast-sandbox
 
-kind-load-controller:
+kind-load-controller: docker-controller
 	kind load docker-image $(CONTROLLER_IMAGE) --name fast-sandbox
 
-kind-load-janitor:
+kind-load-janitor: docker-janitor
 	kind load docker-image $(JANITOR_IMAGE) --name fast-sandbox

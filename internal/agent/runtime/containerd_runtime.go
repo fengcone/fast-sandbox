@@ -443,14 +443,17 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 
 // GracefulDeleteSandbox 优雅删除 sandbox（SIGTERM → wait → SIGKILL）
 // 返回是否成功执行优雅关闭（false 表示需要强制删除）
+// 优化: 拆分为三阶段，减少持锁时间从 10-15s 到 <100ms
 func (r *ContainerdRuntime) GracefulDeleteSandbox(ctx context.Context, sandboxID string, waitTimeout time.Duration) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+
+	// ===== 阶段1: 获取任务引用 (短暂持锁) =====
+	r.mu.Lock()
 	container, err := r.client.LoadContainer(ctx, sandboxID)
 	if err != nil {
 		// 容器不存在，标记为已删除
 		delete(r.sandboxes, sandboxID)
+		r.mu.Unlock()
 		return true
 	}
 
@@ -459,25 +462,31 @@ func (r *ContainerdRuntime) GracefulDeleteSandbox(ctx context.Context, sandboxID
 		// 任务不存在，直接删除容器
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		delete(r.sandboxes, sandboxID)
+		r.mu.Unlock()
 		return true
 	}
+	r.mu.Unlock() // 释放锁，后续等待不再持锁
 
-	// 1. 发送 SIGTERM
+	// ===== 阶段2: 等待退出 (不持锁，可能 10s+) =====
+	// 发送 SIGTERM
 	if err := task.Kill(ctx, syscall.SIGTERM); err != nil {
 		fmt.Printf("Failed to send SIGTERM to %s: %v, force delete\n", sandboxID, err)
+		// 直接强制删除
+		r.mu.Lock()
 		_, _ = task.Delete(ctx, containerd.WithProcessKill)
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		delete(r.sandboxes, sandboxID)
+		r.mu.Unlock()
 		return false
 	}
 
-	// 2. 等待进程退出
+	// 等待进程退出
 	waitCh, err := task.Wait(ctx)
 	if err != nil {
 		fmt.Printf("Failed to wait for %s: %v\n", sandboxID, err)
 	}
 
-	// 3. 超时检查
+	// 超时检查（不持锁等待）
 	select {
 	case <-waitCh:
 		// 进程正常退出
@@ -488,7 +497,10 @@ func (r *ContainerdRuntime) GracefulDeleteSandbox(ctx context.Context, sandboxID
 		<-waitCh // 等待 SIGKILL 生效
 	}
 
-	// 4. 删除任务和容器
+	// ===== 阶段3: 清理资源 (短暂持锁) =====
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	_, _ = task.Delete(ctx, containerd.WithProcessKill)
 	_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 	delete(r.sandboxes, sandboxID)

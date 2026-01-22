@@ -53,82 +53,155 @@ type AgentRegistry interface {
 	CleanupStaleAgents(timeout time.Duration) int
 }
 
-// InMemoryRegistry is a simple in-memory implementation of AgentRegistry.
+// agentSlot 是单个 Agent 的锁保护容器
+// 用于细粒度锁优化，每个 Agent 独立锁
+type agentSlot struct {
+	mu   sync.RWMutex
+	info AgentInfo
+}
+
+// InMemoryRegistry is a fine-grained locking implementation of AgentRegistry.
+// 优化: 使用细粒度锁，每个 Agent 独立锁，减少全局锁竞争
 type InMemoryRegistry struct {
-	mu     sync.RWMutex
-	agents map[AgentID]AgentInfo
+	mu     sync.RWMutex           // 仅保护 agents map 结构
+	agents map[AgentID]*agentSlot // 每个 Agent 有独立的 slot 锁
 }
 
 // NewInMemoryRegistry creates a new in-memory registry.
 func NewInMemoryRegistry() *InMemoryRegistry {
 	return &InMemoryRegistry{
-		agents: make(map[AgentID]AgentInfo),
+		agents: make(map[AgentID]*agentSlot),
 	}
 }
 
+// RegisterOrUpdate 注册或更新 Agent 信息
+// 优化: 只在创建新 slot 时持全局锁，更新时只持单个 slot 锁
 func (r *InMemoryRegistry) RegisterOrUpdate(info AgentInfo) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// 1. 快速检查是否存在 (读锁)
+	r.mu.RLock()
+	slot, exists := r.agents[info.ID]
+	r.mu.RUnlock()
 
-	if old, ok := r.agents[info.ID]; ok {
-		info.Allocated = old.Allocated
-		info.UsedPorts = old.UsedPorts
+	// 2. 不存在则创建 (短暂写锁)
+	if !exists {
+		r.mu.Lock()
+		// 双重检查
+		slot, exists = r.agents[info.ID]
+		if !exists {
+			slot = &agentSlot{
+				info: AgentInfo{
+					ID:              info.ID,
+					UsedPorts:       make(map[int32]bool),
+					SandboxStatuses: make(map[string]api.SandboxStatus),
+				},
+			}
+			r.agents[info.ID] = slot
+		}
+		r.mu.Unlock()
 	}
 
-	if info.UsedPorts == nil {
-		info.UsedPorts = make(map[int32]bool)
-	}
-	if info.SandboxStatuses == nil {
-		info.SandboxStatuses = make(map[string]api.SandboxStatus)
+	// 3. 更新 slot (只锁单个 Agent)
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+
+	// 保留本地状态 (Allocated, UsedPorts)
+	allocated := slot.info.Allocated
+	usedPorts := slot.info.UsedPorts
+	sandboxStatuses := slot.info.SandboxStatuses
+
+	// 更新来自心跳的信息
+	slot.info = info
+	slot.info.Allocated = allocated
+
+	if usedPorts != nil {
+		slot.info.UsedPorts = usedPorts
+	} else {
+		slot.info.UsedPorts = make(map[int32]bool)
 	}
 
-	r.agents[info.ID] = info
+	if sandboxStatuses != nil && info.SandboxStatuses == nil {
+		slot.info.SandboxStatuses = sandboxStatuses
+	} else if info.SandboxStatuses == nil {
+		slot.info.SandboxStatuses = make(map[string]api.SandboxStatus)
+	}
 }
 
 // CleanupStaleAgents 移除超过指定时间未更新的 Agent
 // 用于防止已删除/宕机 Agent 的记录永久占用内存
 func (r *InMemoryRegistry) CleanupStaleAgents(timeout time.Duration) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	now := time.Now()
-	var staleAgents []AgentID
 
-	for id, a := range r.agents {
-		if now.Sub(a.LastHeartbeat) > timeout {
-			staleAgents = append(staleAgents, id)
+	// 1. 收集所有 slot (读锁)
+	r.mu.RLock()
+	slots := make([]*agentSlot, 0, len(r.agents))
+	ids := make([]AgentID, 0, len(r.agents))
+	for id, slot := range r.agents {
+		slots = append(slots, slot)
+		ids = append(ids, id)
+	}
+	r.mu.RUnlock()
+
+	// 2. 检查每个 slot (单 slot 读锁)
+	var staleAgents []AgentID
+	for i, slot := range slots {
+		slot.mu.RLock()
+		if now.Sub(slot.info.LastHeartbeat) > timeout {
+			staleAgents = append(staleAgents, ids[i])
 		}
+		slot.mu.RUnlock()
 	}
 
-	for _, id := range staleAgents {
-		delete(r.agents, id)
+	// 3. 删除过期 Agent (全局写锁)
+	if len(staleAgents) > 0 {
+		r.mu.Lock()
+		for _, id := range staleAgents {
+			delete(r.agents, id)
+		}
+		r.mu.Unlock()
 	}
 
 	return len(staleAgents)
 }
 
+// GetAllAgents 返回所有 Agent 的快照
 func (r *InMemoryRegistry) GetAllAgents() []AgentInfo {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	slots := make([]*agentSlot, 0, len(r.agents))
+	for _, slot := range r.agents {
+		slots = append(slots, slot)
+	}
+	r.mu.RUnlock()
 
-	out := make([]AgentInfo, 0, len(r.agents))
-	for _, a := range r.agents {
-		out = append(out, a)
+	// 复制每个 Agent 信息 (单 slot 读锁)
+	out := make([]AgentInfo, 0, len(slots))
+	for _, slot := range slots {
+		slot.mu.RLock()
+		out = append(out, slot.info)
+		slot.mu.RUnlock()
 	}
 	return out
 }
 
+// GetAgentByID 获取指定 Agent 的信息
 func (r *InMemoryRegistry) GetAgentByID(id AgentID) (AgentInfo, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	a, ok := r.agents[id]
-	return a, ok
+	slot, ok := r.agents[id]
+	r.mu.RUnlock()
+
+	if !ok {
+		return AgentInfo{}, false
+	}
+
+	slot.mu.RLock()
+	info := slot.info
+	slot.mu.RUnlock()
+
+	return info, true
 }
 
+// Allocate 原子分配一个 Agent 插槽
+// 优化: 两阶段分配 - 评分阶段只读，分配阶段只锁选中的 Agent
 func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	// 端口范围验证 (有效端口范围: 1-65535)
 	for _, p := range sb.Spec.ExposedPorts {
 		if p < 1 || p > 65535 {
@@ -136,150 +209,183 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		}
 	}
 
-	var bestID AgentID
+	// 1. 收集候选 Agent (全局读锁)
+	r.mu.RLock()
+	candidates := make([]*agentSlot, 0, len(r.agents))
+	for _, slot := range r.agents {
+		candidates = append(candidates, slot)
+	}
+	r.mu.RUnlock()
+
+	// 2. 评分阶段 (每个 slot 读锁)
+	var bestSlot *agentSlot
 	var minScore = 1000000
 
-	for id, a := range r.agents {
-		if a.PoolName != sb.Spec.PoolRef {
+	for _, slot := range candidates {
+		slot.mu.RLock()
+		info := slot.info
+
+		// 过滤条件
+		if info.PoolName != sb.Spec.PoolRef {
+			slot.mu.RUnlock()
 			continue
 		}
-		// Namespace 强制校验：Sandbox 必须调度到同一 Namespace 的 Agent
-		// 原因：网络/存储策略通常限制在 Namespace 内
-		if a.Namespace != sb.Namespace {
+		// Namespace 强制校验
+		if info.Namespace != sb.Namespace {
+			slot.mu.RUnlock()
 			continue
 		}
-		// Capacity 为 0 表示无限制，Capacity > 0 时检查容量
-		if a.Capacity > 0 && a.Allocated >= a.Capacity {
+		// 容量检查
+		if info.Capacity > 0 && info.Allocated >= info.Capacity {
+			slot.mu.RUnlock()
 			continue
 		}
 
-		// 1. 端口冲突检查 (硬性约束)
+		// 端口冲突检查
 		portConflict := false
 		for _, p := range sb.Spec.ExposedPorts {
-			if a.UsedPorts[p] {
+			if info.UsedPorts[p] {
 				portConflict = true
 				break
 			}
 		}
 		if portConflict {
+			slot.mu.RUnlock()
 			continue
 		}
 
-		// 2. 镜像亲和性计算 (软性权重)
+		// 镜像亲和性计算
 		hasImage := false
-		for _, img := range a.Images {
+		for _, img := range info.Images {
 			if img == sb.Spec.Image {
 				hasImage = true
 				break
 			}
 		}
 
-		// 打分逻辑：
-		// - 没镜像的节点基础分 +1000
-		// - 负载 (Allocated) 基础分 +N
-		// 目标：优先选已有镜像的，其次选负载低的
-		score := a.Allocated
+		// 打分
+		score := info.Allocated
 		if !hasImage {
 			score += 1000
 		}
 
+		slot.mu.RUnlock()
+
 		if score < minScore {
 			minScore = score
-			bestID = id
+			bestSlot = slot
 		}
 	}
 
-	if bestID == "" {
+	if bestSlot == nil {
 		return nil, fmt.Errorf("insufficient capacity or port conflict in pool %s", sb.Spec.PoolRef)
 	}
 
-	agent := r.agents[bestID]
-	agent.Allocated++
-	if agent.UsedPorts == nil {
-		agent.UsedPorts = make(map[int32]bool)
+	// 3. 分配阶段 (只锁选中的 Agent)
+	bestSlot.mu.Lock()
+	defer bestSlot.mu.Unlock()
+
+	// 双重检查：分配期间状态可能已变
+	info := bestSlot.info
+	if info.Capacity > 0 && info.Allocated >= info.Capacity {
+		return nil, fmt.Errorf("agent %s capacity full during allocation", info.ID)
 	}
 	for _, p := range sb.Spec.ExposedPorts {
-		agent.UsedPorts[p] = true
+		if info.UsedPorts[p] {
+			return nil, fmt.Errorf("port %d conflicted during allocation", p)
+		}
 	}
-	r.agents[bestID] = agent
 
-	res := agent
+	// 执行分配
+	bestSlot.info.Allocated++
+	if bestSlot.info.UsedPorts == nil {
+		bestSlot.info.UsedPorts = make(map[int32]bool)
+	}
+	for _, p := range sb.Spec.ExposedPorts {
+		bestSlot.info.UsedPorts[p] = true
+	}
+
+	res := bestSlot.info
 	return &res, nil
 }
 
+// Release 释放指定 Agent 上的 Sandbox 占用的插槽和端口
 func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	slot, ok := r.agents[id]
+	r.mu.RUnlock()
 
-	a, ok := r.agents[id]
 	if !ok {
-		// Agent 不存在，无需释放
 		return
 	}
 
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+
 	// 验证 sandbox 是否真的分配给这个 agent
-	// 通过检查 SandboxStatuses 中是否有这个 sandbox 的记录
-	if _, exists := a.SandboxStatuses[sb.Name]; !exists && len(a.SandboxStatuses) > 0 {
-		// 如果 SandboxStatuses 不为空但没有这个 sandbox，说明它可能从未被分配到这里
-		// 为了安全起见，仍然执行端口清理（防止边缘情况），但不减少 Allocated 计数
+	if _, exists := slot.info.SandboxStatuses[sb.Name]; !exists && len(slot.info.SandboxStatuses) > 0 {
+		// 安全起见仍然清理端口
 		for _, p := range sb.Spec.ExposedPorts {
-			delete(a.UsedPorts, p)
+			delete(slot.info.UsedPorts, p)
 		}
 		return
 	}
 
-	// 执行释放操作
-	if a.Allocated > 0 {
-		a.Allocated--
+	// 执行释放
+	if slot.info.Allocated > 0 {
+		slot.info.Allocated--
 	}
 	for _, p := range sb.Spec.ExposedPorts {
-		delete(a.UsedPorts, p)
+		delete(slot.info.UsedPorts, p)
 	}
-	// 清理 SandboxStatuses 记录
-	delete(a.SandboxStatuses, sb.Name)
-	r.agents[id] = a
+	delete(slot.info.SandboxStatuses, sb.Name)
 }
 
+// Restore 从 K8s 现状恢复内存状态
 func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
-
 	var sbList apiv1alpha1.SandboxList
-
 	if err := c.List(ctx, &sbList); err != nil {
-
 		return err
-
 	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	for _, sb := range sbList.Items {
 		if sb.Status.AssignedPod != "" {
 			id := AgentID(sb.Status.AssignedPod)
-			a, ok := r.agents[id]
+			slot, ok := r.agents[id]
 			if !ok {
-				a = AgentInfo{
-					ID:              id,
-					PodName:         string(id),
-					UsedPorts:       make(map[int32]bool),
-					SandboxStatuses: make(map[string]api.SandboxStatus),
-					LastHeartbeat:   time.Now(), // 给个初始时间
+				slot = &agentSlot{
+					info: AgentInfo{
+						ID:              id,
+						PodName:         string(id),
+						UsedPorts:       make(map[int32]bool),
+						SandboxStatuses: make(map[string]api.SandboxStatus),
+						LastHeartbeat:   time.Now(),
+					},
 				}
+				r.agents[id] = slot
 			}
-			if a.UsedPorts == nil {
-				a.UsedPorts = make(map[int32]bool)
+
+			slot.mu.Lock()
+			if slot.info.UsedPorts == nil {
+				slot.info.UsedPorts = make(map[int32]bool)
 			}
-			if a.SandboxStatuses == nil {
-				a.SandboxStatuses = make(map[string]api.SandboxStatus)
+			if slot.info.SandboxStatuses == nil {
+				slot.info.SandboxStatuses = make(map[string]api.SandboxStatus)
 			}
-			a.Allocated++
+			slot.info.Allocated++
 			for _, p := range sb.Spec.ExposedPorts {
-				a.UsedPorts[p] = true
+				slot.info.UsedPorts[p] = true
 			}
-			r.agents[id] = a
+			slot.mu.Unlock()
 		}
 	}
 	return nil
 }
 
+// Remove 移除指定 Agent
 func (r *InMemoryRegistry) Remove(id AgentID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

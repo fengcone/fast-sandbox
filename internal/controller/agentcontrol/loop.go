@@ -80,9 +80,11 @@ func (l *Loop) Start(ctx context.Context) {
 
 const (
 	// perAgentTimeout 是单个 Agent 探测的超时时间
-	perAgentTimeout = 2 * time.Second
+	// 优化: 从 2s 增加到 5s，配合锁优化提供更合理的超时容忍
+	perAgentTimeout = 5 * time.Second
 	// staleAgentTimeout 是 Agent 心跳超时时间，超过此时间未更新的 Agent 会被清理
-	staleAgentTimeout = 5 * time.Minute
+	// 设置为 15 秒，以便在测试中快速验证 Agent 丢失场景
+	staleAgentTimeout = 15 * time.Second
 )
 
 func (l *Loop) syncOnce(ctx context.Context) error {
@@ -143,11 +145,12 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		l.Registry.RegisterOrUpdate(info)
 	}
 
-	// 4. Cleanup stale agents
+	// 4. Cleanup stale agents (Pods that were deleted)
 	allAgents := l.Registry.GetAllAgents()
+	//logger.Info("Agent control loop: checking for stale agents", "totalAgents", len(allAgents), "seenAgents", len(seenAgents))
 	for _, a := range allAgents {
 		if !seenAgents[a.ID] {
-			logger.Info("Removing stale agent from registry", "agent", a.ID)
+			logger.Info("Removing stale agent from registry (Pod not found)", "agent", a.ID, "pool", a.PoolName)
 			l.Registry.Remove(a.ID)
 		}
 	}

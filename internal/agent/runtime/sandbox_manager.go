@@ -16,9 +16,9 @@ import (
 // SandboxManager 管理 sandbox 的生命周期
 // 使用 Runtime 接口与底层容器运行时交互
 type SandboxManager struct {
-	mu         sync.RWMutex
-	runtime    Runtime
-	capacity   int
+	mu       sync.RWMutex
+	runtime  Runtime
+	capacity int
 	// sandboxes 维护 sandboxID -> metadata 的映射（从 runtime 同步）
 	sandboxes map[string]*SandboxMetadata
 	// sandboxPhases 维护 sandboxID -> phase 的映射（用于状态上报）
@@ -46,13 +46,28 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 // CreateSandbox 创建单个 sandbox（命令式，幂等）
 // 如果 sandbox 已存在，直接返回成功（幂等性）
 // 返回创建时间戳供 Janitor 判断孤儿状态
+// 优化: 将长耗时的 runtime.CreateSandbox 移出锁，只在更新缓存时持锁
 func (m *SandboxManager) CreateSandbox(ctx context.Context, spec api.SandboxSpec) (*api.CreateSandboxResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// 1. 快速幂等检查 (短暂读锁)
+	m.mu.RLock()
+	if _, exists := m.sandboxes[spec.SandboxID]; exists {
+		m.mu.RUnlock()
+		log.Printf("Sandbox %s already exists in cache, returning success (idempotent)", spec.SandboxID)
+		return &api.CreateSandboxResponse{
+			Success:   true,
+			SandboxID: spec.SandboxID,
+		}, nil
+	}
+	m.mu.RUnlock()
 
-	// 1. 幂等检查：已存在则直接返回成功
+	// 也检查 runtime (不持锁)
 	if existing, _ := m.runtime.GetSandbox(ctx, spec.SandboxID); existing != nil {
-		log.Printf("Sandbox %s already exists, returning success (idempotent)", spec.SandboxID)
+		log.Printf("Sandbox %s already exists in runtime, returning success (idempotent)", spec.SandboxID)
+		// 同步到缓存
+		m.mu.Lock()
+		m.sandboxes[spec.SandboxID] = existing
+		m.sandboxPhases[spec.SandboxID] = "running"
+		m.mu.Unlock()
 		return &api.CreateSandboxResponse{
 			Success:   true,
 			SandboxID: spec.SandboxID,
@@ -60,7 +75,7 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec api.SandboxSpec
 		}, nil
 	}
 
-	// 2. 不存在则创建
+	// 2. 创建容器 (不持锁，可能秒级)
 	config := &SandboxConfig{
 		SandboxID:  spec.SandboxID,
 		ClaimUID:   spec.ClaimUID,
@@ -84,9 +99,22 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec api.SandboxSpec
 		}, err
 	}
 
-	// 更新本地缓存
+	// 3. 更新缓存 (短暂写锁)
+	m.mu.Lock()
+	// 双重检查 (防止并发创建)
+	if _, exists := m.sandboxes[spec.SandboxID]; exists {
+		m.mu.Unlock()
+		// 清理刚创建的容器
+		log.Printf("Sandbox %s was created concurrently, cleaning up duplicate", spec.SandboxID)
+		_ = m.runtime.DeleteSandbox(ctx, spec.SandboxID)
+		return &api.CreateSandboxResponse{
+			Success:   true,
+			SandboxID: spec.SandboxID,
+		}, nil
+	}
 	m.sandboxes[spec.SandboxID] = metadata
 	m.sandboxPhases[spec.SandboxID] = "running"
+	m.mu.Unlock()
 
 	log.Printf("Created sandbox %s (image: %s)", spec.SandboxID, spec.Image)
 	return &api.CreateSandboxResponse{
@@ -204,27 +232,38 @@ func (m *SandboxManager) GetRunningSandboxCount() int {
 }
 
 // GetAllSandboxStatuses 获取所有 sandbox 的状态（用于心跳上报）
+// 优化: 先复制列表再查询 runtime，避免嵌套锁和长时间持锁
 func (m *SandboxManager) GetAllSandboxStatuses(ctx context.Context) []api.SandboxStatus {
+	// 1. 快速复制 sandbox 列表 (短暂读锁)
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	sandboxIDs := make([]string, 0, len(m.sandboxes))
+	snapshots := make(map[string]*SandboxMetadata)
+	phases := make(map[string]string)
+	for id, meta := range m.sandboxes {
+		sandboxIDs = append(sandboxIDs, id)
+		snapshots[id] = meta
+		phases[id] = m.sandboxPhases[id]
+	}
+	m.mu.RUnlock()
 
-	result := make([]api.SandboxStatus, 0, len(m.sandboxes))
-
-	for sandboxID, metadata := range m.sandboxes {
-		phase := m.sandboxPhases[sandboxID]
+	// 2. 无锁查询 runtime 状态
+	result := make([]api.SandboxStatus, 0, len(sandboxIDs))
+	for _, sandboxID := range sandboxIDs {
+		meta := snapshots[sandboxID]
+		phase := phases[sandboxID]
 		if phase == "" {
 			phase = "running"
 		}
 
-		// 从 runtime 获取最新状态
+		// 不持 Manager 锁调用 runtime
 		runtimeStatus, _ := m.runtime.GetSandboxStatus(ctx, sandboxID)
 
 		result = append(result, api.SandboxStatus{
 			SandboxID: sandboxID,
-			ClaimUID:  metadata.ClaimUID,
+			ClaimUID:  meta.ClaimUID,
 			Phase:     phase,
 			Message:   runtimeStatus,
-			CreatedAt: metadata.CreatedAt,
+			CreatedAt: meta.CreatedAt,
 		})
 	}
 
