@@ -12,9 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
@@ -28,8 +28,7 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme = runtime.NewScheme()
 )
 
 func init() {
@@ -49,11 +48,7 @@ func main() {
 	flag.StringVar(&fastpathConsistencyMode, "fastpath-consistency-mode", "fast", "Fast-Path consistency mode: fast (default) or strong")
 	flag.DurationVar(&fastpathOrphanTimeout, "fastpath-orphan-timeout", 10*time.Second, "Fast-Path orphan cleanup timeout (for Fast mode)")
 
-	opts := zap.Options{Development: true}
-	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -63,7 +58,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		klog.ErrorS(err, "unable to start manager")
 		os.Exit(1)
 	}
 
@@ -76,7 +71,7 @@ func main() {
 		Registry:    reg,
 		AgentClient: agentHTTPClient,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Sandbox")
+		klog.ErrorS(err, "unable to create controller", "controller", "Sandbox")
 		os.Exit(1)
 	}
 
@@ -85,7 +80,7 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Registry: reg,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SandboxPool")
+		klog.ErrorS(err, "unable to create controller", "controller", "SandboxPool")
 		os.Exit(1)
 	}
 
@@ -95,7 +90,7 @@ func main() {
 
 	lis, err := net.Listen("tcp", ":9090")
 	if err != nil {
-		setupLog.Error(err, "failed to listen on port 9090 for fast-path")
+		klog.ErrorS(err, "failed to listen on port 9090 for fast-path")
 		os.Exit(1)
 	}
 	grpcServer := grpc.NewServer()
@@ -111,37 +106,37 @@ func main() {
 		AgentClient:            agentHTTPClient,
 		DefaultConsistencyMode: consistencyMode,
 	})
-	setupLog.Info("Starting Fast-Path gRPC server V2", "port", 9090, "consistency-mode", consistencyMode, "orphan-timeout", fastpathOrphanTimeout)
+	klog.InfoS("Starting Fast-Path gRPC server V2", "port", 9090, "consistency-mode", consistencyMode, "orphan-timeout", fastpathOrphanTimeout)
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
-			setupLog.Error(err, "failed to serve gRPC")
+			klog.ErrorS(err, "failed to serve gRPC")
 		}
 	}()
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		klog.ErrorS(err, "unable to set up health check")
 		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		klog.ErrorS(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	klog.InfoS("starting manager")
 
 	go func() {
 		if mgr.GetCache().WaitForCacheSync(context.Background()) {
-			setupLog.Info("Cache synced, restoring registry state from cluster")
+			klog.InfoS("Cache synced, restoring registry state from cluster")
 			if err := reg.Restore(context.Background(), mgr.GetClient()); err != nil {
-				setupLog.Error(err, "failed to restore registry state")
+				klog.ErrorS(err, "failed to restore registry state")
 			} else {
-				setupLog.Info("Registry state restored successfully")
+				klog.InfoS("Registry state restored successfully")
 			}
 		}
 	}()
 
 	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "problem running manager")
+		klog.ErrorS(err, "problem running manager")
 		os.Exit(1)
 	}
 }

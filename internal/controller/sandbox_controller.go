@@ -12,11 +12,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Constants for controller configuration
@@ -110,7 +110,7 @@ func (r *SandboxReconciler) ensureFinalizer(ctx context.Context, sandbox *apiv1a
 // handleDeletion processes the Sandbox deletion workflow.
 // State transitions: Bound/Running → Terminating → (Agent confirms) → Removed
 func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	if !controllerutil.ContainsFinalizer(sandbox, FinalizerName) {
 		return ctrl.Result{}, nil
@@ -141,7 +141,7 @@ func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *apiv1al
 
 // handleActiveDeletion handles deletion of an active (Bound/Running) sandbox.
 func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	// Check if Agent exists
 	if sandbox.Status.AssignedPod == "" {
@@ -172,7 +172,7 @@ func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *a
 
 // handleTerminatingDeletion handles a sandbox in Terminating phase.
 func (r *SandboxReconciler) handleTerminatingDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	// Check if Agent still exists
 	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
@@ -245,7 +245,7 @@ func (r *SandboxReconciler) handleExpiration(ctx context.Context, sandbox *apiv1
 
 // processExpiration cleans up an expired sandbox.
 func (r *SandboxReconciler) processExpiration(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error, bool) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 	logger.Info("Processing sandbox expiration")
 
 	// Delete runtime from Agent if assigned
@@ -290,7 +290,7 @@ func (r *SandboxReconciler) handleReset(ctx context.Context, sandbox *apiv1alpha
 		return ctrl.Result{}, nil, false
 	}
 
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 	logger.Info("Processing reset request")
 
 	// Clean up existing Agent resources
@@ -357,7 +357,7 @@ func (r *SandboxReconciler) reconcilePhase(ctx context.Context, sandbox *apiv1al
 // reconcilePending handles sandboxes in Pending phase.
 // Workflow: Schedule → Create on Agent → Transition to Bound
 func (r *SandboxReconciler) reconcilePending(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	// Step 1: Scheduling (if not yet assigned)
 	if sandbox.Status.AssignedPod == "" {
@@ -395,7 +395,7 @@ func (r *SandboxReconciler) reconcilePending(ctx context.Context, sandbox *apiv1
 // reconcileRunning handles sandboxes in Bound/Running phase.
 // Workflow: Sync status from Agent, handle Agent loss
 func (r *SandboxReconciler) reconcileRunning(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	// Validate Agent exists
 	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
@@ -421,7 +421,7 @@ func (r *SandboxReconciler) reconcileRunning(ctx context.Context, sandbox *apiv1
 // reconcileLost handles sandboxes in Lost phase.
 // Workflow: Wait for new Agent to become available, then transition to Pending for rescheduling.
 func (r *SandboxReconciler) reconcileLost(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	// Check if any Agent is available for the sandbox's pool
 	agent, err := r.Registry.Allocate(sandbox)
@@ -463,7 +463,7 @@ func (r *SandboxReconciler) reconcileLost(ctx context.Context, sandbox *apiv1alp
 
 // handleScheduling allocates an Agent for the Sandbox.
 func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	agent, err := r.Registry.Allocate(sandbox)
 	if err != nil {
@@ -503,7 +503,7 @@ func (r *SandboxReconciler) handleScheduling(ctx context.Context, sandbox *apiv1
 
 // handleAgentLost handles the case when the assigned Agent is no longer available.
 func (r *SandboxReconciler) handleAgentLost(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 	logger.Info("Assigned agent lost", "agent", sandbox.Status.AssignedPod)
 
 	if sandbox.Spec.FailurePolicy == apiv1alpha1.FailurePolicyAutoRecreate {

@@ -9,7 +9,7 @@ import (
 	"fast-sandbox/internal/controller/agentpool"
 
 	corev1 "k8s.io/api/core/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -33,7 +33,7 @@ func NewLoop(c client.Client, reg agentpool.AgentRegistry, agentClient *api.Agen
 
 // Start runs the loop until the context is cancelled.
 func (l *Loop) Start(ctx context.Context) {
-	logger := ctrl.Log.WithName("agent-control-loop")
+	logger := klog.Background().WithName("agent-control-loop")
 	ticker := time.NewTicker(l.Interval)
 	defer ticker.Stop()
 
@@ -81,7 +81,7 @@ const (
 )
 
 func (l *Loop) syncOnce(ctx context.Context) error {
-	logger := ctrl.Log.WithName("agent-control-loop")
+	logger := klog.Background().WithName("agent-control-loop")
 
 	syncCtx, cancel := context.WithTimeout(ctx, l.Interval*2)
 	defer cancel()

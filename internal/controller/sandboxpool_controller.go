@@ -11,10 +11,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // SandboxPoolReconciler reconciles SandboxPool resources.
@@ -26,7 +26,7 @@ type SandboxPoolReconciler struct {
 
 // Reconcile manages the lifecycle of Agent Pods based on the demand from Sandboxes.
 func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+logger := klog.FromContext(ctx)
 
 	var pool apiv1alpha1.SandboxPool
 	if err := r.Get(ctx, req.NamespacedName, &pool); err != nil {
