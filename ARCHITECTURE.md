@@ -81,12 +81,64 @@
 4.  CLI 发起 HTTP GET `/api/v1/agent/logs?follow=true`。
 5.  Agent 读取宿主机日志文件并流式返回。
 
-## 5. 开发计划
+## 5. 日志 (Logging)
+
+Fast Sandbox 使用 [klog](https://github.com/kubernetes/klog) 进行结构化日志记录，这是 Kubernetes 生态系统的标准日志库。
+
+### 日志级别
+
+*   **`klog.InfoS()`**: 信息性消息
+*   **`klog.ErrorS()`**: 错误消息（始终记录）
+*   **`klog.V(2).InfoS()`**: 详细信息（默认隐藏，可通过 `-v=2` 启用）
+*   **`klog.V(4).InfoS()`**: 调试级别信息（默认隐藏，可通过 `-v=4` 启用）
+
+### 使用示例
+
+```go
+// 基本信息日志
+klog.InfoS("Sandbox created",
+    "name", sb.Name,
+    "namespace", sb.Namespace,
+    "image", sb.Spec.Image)
+
+// 错误日志
+klog.ErrorS(err, "Failed to allocate agent",
+    "sandbox", sb.Name,
+    "pool", sb.Spec.PoolRef)
+
+// 详细级别日志（用于性能分析）
+klog.V(2).InfoS("Registry allocation",
+    "sandbox", sb.Name,
+    "selectedAgent", agent.ID,
+    "imageHit", hasImage,
+    "duration", time.Since(start))
+
+// 调试级别日志
+klog.V(4).InfoS("Checking image affinity",
+    "requiredImage", sb.Spec.Image,
+    "agentImages", agent.Images)
+```
+
+### 启用调试日志
+
+```bash
+# Controller
+./bin/controller -v=2
+
+# Agent
+./bin/agent -v=4
+
+# CLI
+fsb-ctl -v=4 list
+```
+
+## 6. 开发计划
 
 *   [x] **Phase 1**: 核心 Runtime (Containerd) 与 gRPC 框架。
 *   [x] **Phase 2**: Fast-Path API 与 Registry 调度。
 *   [x] **Phase 3**: CLI (`fsb-ctl`) 与交互式体验。
 *   [x] **Phase 4**: 日志流式传输与自动隧道。
+*   [x] **Logging**: 统一日志框架，使用 klog 进行结构化日志记录。
 *   [ ] **Phase 5**: 容器热迁移 (Checkpoint/Restore)， 初步想法是利用 Janitor P2P 分发。
 *   [ ] **Phase 6**: Web 控制台，以及流量Proxy 组件，打通生产环境和开发环境。
 *   [ ] **Phase 7**: gVisor 容器支持，解决生产环境安全问题。
