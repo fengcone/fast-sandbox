@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/klog/v2"
 )
 
 var follow bool
@@ -27,29 +28,37 @@ var logsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
+		namespace := viper.GetString("namespace")
+		klog.V(4).InfoS("CLI logs command started", "name", name, "namespace", namespace, "follow", follow)
 
 		client, conn := getClient()
 		if conn != nil {
 			defer conn.Close()
 		}
 
+		klog.V(4).InfoS("Getting sandbox info for logs", "name", name)
 		info, err := client.GetSandbox(context.Background(), &fastpathv1.GetRequest{
 			SandboxId: name,
-			Namespace: viper.GetString("namespace"),
+			Namespace: namespace,
 		})
 		if err != nil {
+			klog.ErrorS(err, "Failed to get sandbox info", "name", name)
 			log.Fatalf("Failed to get sandbox info: %v", err)
 		}
 
 		if info.AgentPod == "" {
+			klog.ErrorS(nil, "Sandbox not assigned to any agent", "name", name)
 			log.Fatal("Sandbox is not assigned to any agent yet.")
 		}
+		klog.V(4).InfoS("Sandbox agent pod", "name", name, "agentPod", info.AgentPod)
 
 		// todo add proxy for agent
-		localPort, pfCmd, err := startPortForward(info.AgentPod, viper.GetString("namespace"))
+		localPort, pfCmd, err := startPortForward(info.AgentPod, namespace)
 		if err != nil {
+			klog.ErrorS(err, "Failed to start port-forward", "agentPod", info.AgentPod)
 			log.Fatalf("Failed to start port-forward: %v", err)
 		}
+		klog.V(4).InfoS("Port-forward started", "localPort", localPort, "agentPod", info.AgentPod)
 		defer func() {
 			if pfCmd != nil && pfCmd.Process != nil {
 				pfCmd.Process.Kill()
@@ -57,14 +66,17 @@ var logsCmd = &cobra.Command{
 		}()
 
 		url := fmt.Sprintf("http://localhost:%d/api/v1/agent/logs?sandboxId=%s&follow=%t", localPort, name, follow)
+		klog.V(4).InfoS("Fetching logs from agent", "url", url)
 		resp, err := http.Get(url)
 		if err != nil {
+			klog.ErrorS(err, "Failed to connect to agent", "url", url)
 			log.Fatalf("Failed to connect to agent: %v", err)
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
+			klog.ErrorS(nil, "Agent returned error", "statusCode", resp.StatusCode, "body", string(body))
 			log.Fatalf("Agent returned error: %s", string(body))
 		}
 
@@ -78,9 +90,11 @@ var logsCmd = &cobra.Command{
 
 		if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
 			if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+				klog.ErrorS(err, "Log stream ended with error")
 				log.Printf("Log stream ended: %v", err)
 			}
 		}
+		klog.V(4).InfoS("Log streaming completed", "name", name)
 	},
 }
 

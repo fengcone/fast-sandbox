@@ -11,6 +11,7 @@ import (
 	fastpathv1 "fast-sandbox/api/proto/v1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/klog/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,19 +22,26 @@ var getCmd = &cobra.Command{
 	Short: "Get detailed sandbox information",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		sandboxID := args[0]
+		namespace := viper.GetString("namespace")
+		klog.V(4).InfoS("CLI get command started", "sandboxId", sandboxID, "namespace", namespace)
+
 		client, conn := getClient()
 		if conn != nil {
 			defer conn.Close()
 		}
 
+		klog.V(4).InfoS("Sending GetSandbox request", "sandboxId", sandboxID, "namespace", namespace)
 		resp, err := client.GetSandbox(context.Background(), &fastpathv1.GetRequest{
-			SandboxId: args[0],
-			Namespace: viper.GetString("namespace"),
+			SandboxId: sandboxID,
+			Namespace: namespace,
 		})
 		if err != nil {
+			klog.ErrorS(err, "GetSandbox request failed", "sandboxId", sandboxID, "namespace", namespace)
 			log.Fatalf("Error: %v", err)
 		}
 
+		klog.V(4).InfoS("GetSandbox request succeeded", "sandboxId", sandboxID, "phase", resp.Phase, "outputFormat", outputFormat)
 		if outputFormat == "json" {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")

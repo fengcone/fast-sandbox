@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -71,11 +72,14 @@ var clientFactory = defaultClientFactory
 
 func defaultClientFactory() (fastpathv1.FastPathServiceClient, *grpc.ClientConn, error) {
 	ep := viper.GetString("endpoint")
+	klog.V(4).InfoS("Creating gRPC client connection", "endpoint", ep)
 
 	conn, err := grpc.Dial(ep, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
+		klog.ErrorS(err, "Failed to connect to gRPC endpoint", "endpoint", ep)
 		return nil, nil, fmt.Errorf("failed to connect to %s: %v", ep, err)
 	}
+	klog.V(4).InfoS("Successfully connected to gRPC endpoint", "endpoint", ep)
 	return fastpathv1.NewFastPathServiceClient(conn), conn, nil
 }
 

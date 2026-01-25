@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -43,13 +44,14 @@ Examples:
   fsb-ctl update my-sandbox --recovery-timeout 120`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		sandboxID := args[0]
+		namespace := viper.GetString("namespace")
+		klog.V(4).InfoS("CLI update command started", "sandboxId", sandboxID, "namespace", namespace)
+
 		client, conn := getClient()
 		if conn != nil {
 			defer conn.Close()
 		}
-
-		sandboxID := args[0]
-		namespace := viper.GetString("namespace")
 
 		req := &fastpathv1.UpdateRequest{
 			SandboxId: sandboxID,
@@ -60,8 +62,10 @@ Examples:
 		if cmd.Flags().Changed("expire-time") {
 			seconds, err := parseExpireTime(updateExpireTime)
 			if err != nil {
+				klog.ErrorS(err, "Invalid expire-time value", "expireTime", updateExpireTime)
 				log.Fatalf("Error: invalid expire-time: %v", err)
 			}
+			klog.V(4).InfoS("Updating expire-time", "sandboxId", sandboxID, "expireTime", seconds)
 			req.Update = &fastpathv1.UpdateRequest_ExpireTimeSeconds{
 				ExpireTimeSeconds: seconds,
 			}
@@ -70,23 +74,28 @@ Examples:
 		if cmd.Flags().Changed("failure-policy") {
 			policy, err := parseFailurePolicy(updateFailurePolicy)
 			if err != nil {
+				klog.ErrorS(err, "Invalid failure-policy value", "failurePolicy", updateFailurePolicy)
 				log.Fatalf("Error: invalid failure-policy: %v", err)
 			}
+			klog.V(4).InfoS("Updating failure-policy", "sandboxId", sandboxID, "failurePolicy", policy)
 			req.Update = &fastpathv1.UpdateRequest_FailurePolicy{
 				FailurePolicy: policy,
 			}
 		}
 
 		if cmd.Flags().Changed("recovery-timeout") {
+			klog.V(4).InfoS("Updating recovery-timeout", "sandboxId", sandboxID, "recoveryTimeout", updateRecoveryTimeout)
 			req.Update = &fastpathv1.UpdateRequest_RecoveryTimeoutSeconds{
 				RecoveryTimeoutSeconds: updateRecoveryTimeout,
 			}
 		}
 
 		if len(updateLabels) > 0 {
+			klog.V(4).InfoS("Updating labels", "sandboxId", sandboxID, "labels", updateLabels)
 			for _, label := range updateLabels {
 				parts := strings.SplitN(label, "=", 2)
 				if len(parts) != 2 {
+					klog.ErrorS(nil, "Invalid label format", "label", label)
 					log.Fatalf("Error: invalid label format '%s', expected key=value", label)
 				}
 				req.Labels[parts[0]] = parts[1]
@@ -94,18 +103,23 @@ Examples:
 		}
 
 		if req.Update == nil && len(req.Labels) == 0 {
+			klog.ErrorS(nil, "No update field specified")
 			log.Fatal("Error: at least one update field must be specified (--expire-time, --failure-policy, --recovery-timeout, or --labels)")
 		}
 
+		klog.V(4).InfoS("Sending UpdateSandbox request", "sandboxId", sandboxID)
 		resp, err := client.UpdateSandbox(context.Background(), req)
 		if err != nil {
+			klog.ErrorS(err, "UpdateSandbox request failed", "sandboxId", sandboxID)
 			log.Fatalf("Error: %v", err)
 		}
 
 		if !resp.Success {
+			klog.ErrorS(nil, "UpdateSandbox request returned failure", "sandboxId", sandboxID, "message", resp.Message)
 			log.Fatalf("Error: %s", resp.Message)
 		}
 
+		klog.V(4).InfoS("UpdateSandbox request succeeded", "sandboxId", sandboxID)
 		fmt.Printf("✓ Sandbox %s updated successfully\n", sandboxID)
 		if resp.Sandbox != nil {
 			fmt.Printf("  Phase: %s\n", resp.Sandbox.Phase)

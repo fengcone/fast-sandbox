@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/klog/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,6 +57,7 @@ Priority: Flags > Config File > Interactive Input
 	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
+		klog.V(4).InfoS("CLI run command started", "name", name)
 
 		config := SandboxConfig{
 			PoolRef:         "default-pool",
@@ -63,16 +65,20 @@ Priority: Flags > Config File > Interactive Input
 		}
 
 		if configFile != "" {
+			klog.V(4).InfoS("Loading config from file", "file", configFile)
 			data, err := os.ReadFile(configFile)
 			if err != nil {
+				klog.ErrorS(err, "Failed to read config file", "file", configFile)
 				log.Fatalf("Failed to read config file: %v", err)
 			}
 			if err := yaml.Unmarshal(data, &config); err != nil {
+				klog.ErrorS(err, "Failed to parse config file", "file", configFile)
 				log.Fatalf("Failed to parse config file: %v", err)
 			}
 		} else if image == "" {
 			fmt.Println("Entering interactive mode...")
 			if err := runInteractive(name, &config); err != nil {
+				klog.ErrorS(err, "Interactive mode failed", "name", name)
 				log.Fatalf("Interactive mode failed: %v", err)
 			}
 		}
@@ -93,6 +99,7 @@ Priority: Flags > Config File > Interactive Input
 			config.Command = args[1:]
 		}
 		if config.Image == "" {
+			klog.ErrorS(nil, "Image is required but not provided", "name", name)
 			log.Fatal("Error: image is required (via flag, file, or interactive mode)")
 		}
 
@@ -119,12 +126,15 @@ Priority: Flags > Config File > Interactive Input
 			Envs:            config.Envs,
 			WorkingDir:      config.WorkingDir,
 		}
+		klog.V(4).InfoS("Sending CreateSandbox request", "name", name, "image", config.Image, "pool", config.PoolRef, "namespace", req.Namespace)
 
 		resp, err := client.CreateSandbox(context.Background(), req)
 		if err != nil {
+			klog.ErrorS(err, "CreateSandbox request failed", "name", name)
 			log.Fatalf("Error: %v", err)
 		}
 
+		klog.V(4).InfoS("Sandbox created successfully", "name", name, "sandboxId", resp.SandboxId, "agent", resp.AgentPod, "duration", time.Since(start))
 		fmt.Printf("🎉 Sandbox created successfully in %v\n", time.Since(start))
 		fmt.Printf("ID:        %s\n", resp.SandboxId)
 		fmt.Printf("Agent:     %s\n", resp.AgentPod)
