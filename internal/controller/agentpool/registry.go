@@ -9,6 +9,7 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
 
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -184,6 +185,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 
 	var bestSlot *agentSlot
 	var minScore = 1000000
+	var imageHit bool
 
 	for _, slot := range candidates {
 		slot.mu.RLock()
@@ -222,6 +224,8 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 			}
 		}
 
+		klog.V(4).Info("Checking image affinity", "sandbox", sb.Name, "agent", info.ID, "hasImage", hasImage, "image", sb.Spec.Image)
+
 		score := info.Allocated
 		if !hasImage {
 			score += 1000
@@ -232,6 +236,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		if score < minScore {
 			minScore = score
 			bestSlot = slot
+			imageHit = hasImage
 		}
 	}
 
@@ -259,6 +264,8 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 	for _, p := range sb.Spec.ExposedPorts {
 		bestSlot.info.UsedPorts[p] = true
 	}
+
+	klog.V(2).Info("Registry allocation", "sandbox", sb.Name, "selectedAgent", info.ID, "imageHit", imageHit, "queueSize", len(candidates))
 
 	res := bestSlot.info
 	return &res, nil

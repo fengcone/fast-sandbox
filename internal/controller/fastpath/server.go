@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,6 +42,9 @@ type Server struct {
 var _ fastpathv1.FastPathServiceServer = &Server{}
 
 func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
+	start := time.Now()
+	logger := klog.FromContext(ctx)
+
 	mode := s.DefaultConsistencyMode
 	if req.ConsistencyMode == fastpathv1.ConsistencyMode_STRONG {
 		mode = api.ConsistencyModeStrong
@@ -50,6 +54,8 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 	if sandboxName == "" {
 		sandboxName = fmt.Sprintf("sb-%d", time.Now().UnixNano())
 	}
+
+	logger.V(2).Info("FastPath CreateSandbox called", "name", sandboxName, "namespace", req.Namespace)
 
 	tempSB := &apiv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{
@@ -69,8 +75,11 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 
 	agent, err := s.Registry.Allocate(tempSB)
 	if err != nil {
+		logger.Error(err, "Failed to allocate agent for sandbox", "name", sandboxName, "namespace", req.Namespace)
 		return nil, err
 	}
+
+	logger.V(2).Info("Agent allocated", "agentID", agent.ID, "duration", time.Since(start))
 
 	if mode == api.ConsistencyModeStrong {
 		return s.createStrong(ctx, tempSB, agent, req)
