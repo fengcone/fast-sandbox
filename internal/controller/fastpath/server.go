@@ -79,8 +79,7 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 }
 
 func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
-	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
-	_, err := s.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
+	_, err := s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  tempSB.Name,
 			ClaimName:  tempSB.Name,
@@ -107,8 +106,7 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 		return nil, err
 	}
 
-	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
-	_, err := s.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
+	_, err := s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  tempSB.Name,
 			ClaimUID:   string(tempSB.UID),
@@ -162,7 +160,6 @@ func (s *Server) getEndpoints(ip string, sb *apiv1alpha1.Sandbox) []string {
 
 func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest) (*fastpathv1.ListResponse, error) {
 	namespace := req.Namespace
-	// 1. 从 K8s 获取已有的 CRD
 	var sbList apiv1alpha1.SandboxList
 	if err := s.K8sClient.List(ctx, &sbList, client.InNamespace(namespace)); err != nil {
 		return nil, err
@@ -181,8 +178,6 @@ func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest)
 		})
 	}
 
-	// 2. 补充 Registry 中正在创建（Pending）但还没写 CRD 的沙箱
-	// 这里目前简化处理，主要靠 CRD 对账
 	return res, nil
 }
 
@@ -222,24 +217,21 @@ func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateReques
 		}, nil
 	}
 
-	// 使用 MergePatch 进行更新
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &apiv1alpha1.Sandbox{}
 		if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, latest); err != nil {
 			return err
 		}
 
-		// 应用更新
 		switch v := req.Update.(type) {
 		case *fastpathv1.UpdateRequest_ExpireTimeSeconds:
 			if v.ExpireTimeSeconds == 0 {
-				latest.Spec.ExpireTime = nil // 移除过期时间
+				latest.Spec.ExpireTime = nil
 			} else {
 				t := metav1.NewTime(time.Unix(v.ExpireTimeSeconds, 0))
 				latest.Spec.ExpireTime = &t
 			}
 		case *fastpathv1.UpdateRequest_ResetRevision:
-			// 解析 ISO8601 时间戳
 			t, err := time.Parse(time.RFC3339Nano, v.ResetRevision)
 			if err != nil {
 				return fmt.Errorf("invalid reset_revision format: %v", err)
@@ -271,7 +263,6 @@ func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateReques
 		}, nil
 	}
 
-	// 重新获取更新后的状态用于返回
 	s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, &sb)
 
 	return &fastpathv1.UpdateResponse{

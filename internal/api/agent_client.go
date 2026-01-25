@@ -12,9 +12,9 @@ import (
 // AgentAPIClient defines the interface for communicating with sandbox agents.
 // This allows both the real HTTP client and mocks to be used interchangeably.
 type AgentAPIClient interface {
-	CreateSandbox(agentEndpoint string, req *CreateSandboxRequest) (*CreateSandboxResponse, error)
-	DeleteSandbox(agentEndpoint string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error)
-	GetAgentStatusWithContext(ctx context.Context, agentEndpoint string) (*AgentStatus, error)
+	CreateSandbox(agentIP string, req *CreateSandboxRequest) (*CreateSandboxResponse, error)
+	DeleteSandbox(agentIP string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error)
+	GetAgentStatus(ctx context.Context, agentIP string) (*AgentStatus, error)
 }
 
 const (
@@ -26,15 +26,17 @@ const (
 type AgentClient struct {
 	httpClient *http.Client
 	timeout    time.Duration
+	agentPort  int
 }
 
 // NewAgentClient creates a new agent client.
-func NewAgentClient() *AgentClient {
+func NewAgentClient(agentPort int) *AgentClient {
 	return &AgentClient{
 		httpClient: &http.Client{
 			Timeout: defaultAgentTimeout,
 		},
-		timeout: defaultAgentTimeout,
+		timeout:   defaultAgentTimeout,
+		agentPort: agentPort,
 	}
 }
 
@@ -45,8 +47,8 @@ func (c *AgentClient) SetTimeout(timeout time.Duration) {
 }
 
 // CreateSandbox sends a create sandbox request to the agent.
-func (c *AgentClient) CreateSandbox(agentEndpoint string, req *CreateSandboxRequest) (*CreateSandboxResponse, error) {
-	url := fmt.Sprintf("http://%s/api/v1/agent/create", agentEndpoint)
+func (c *AgentClient) CreateSandbox(agentIP string, req *CreateSandboxRequest) (*CreateSandboxResponse, error) {
+	url := fmt.Sprintf("http://%s:%d/api/v1/agent/create", agentIP, c.agentPort)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -78,8 +80,8 @@ func (c *AgentClient) CreateSandbox(agentEndpoint string, req *CreateSandboxRequ
 }
 
 // DeleteSandbox sends a delete sandbox request to the agent.
-func (c *AgentClient) DeleteSandbox(agentEndpoint string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error) {
-	url := fmt.Sprintf("http://%s/api/v1/agent/delete", agentEndpoint)
+func (c *AgentClient) DeleteSandbox(agentIP string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error) {
+	url := fmt.Sprintf("http://%s:%d/api/v1/agent/delete", agentIP, c.agentPort)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -110,14 +112,8 @@ func (c *AgentClient) DeleteSandbox(agentEndpoint string, req *DeleteSandboxRequ
 	return &deleteResp, nil
 }
 
-// GetAgentStatus fetches the current status of an agent.
-// Deprecated: Use GetAgentStatusWithContext for better timeout control.
-func (c *AgentClient) GetAgentStatus(agentEndpoint string) (*AgentStatus, error) {
-	return c.GetAgentStatusWithContext(context.Background(), agentEndpoint)
-}
-
-// GetAgentStatusWithContext fetches the current status of an agent with context support.
-func (c *AgentClient) GetAgentStatusWithContext(ctx context.Context, agentEndpoint string) (*AgentStatus, error) {
+// GetAgentStatus fetches the current status of an agent with context support.
+func (c *AgentClient) GetAgentStatus(ctx context.Context, agentIP string) (*AgentStatus, error) {
 	// Apply timeout if not already set in context
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline && c.timeout > 0 {
 		var cancel context.CancelFunc
@@ -125,7 +121,7 @@ func (c *AgentClient) GetAgentStatusWithContext(ctx context.Context, agentEndpoi
 		defer cancel()
 	}
 
-	url := fmt.Sprintf("http://%s/api/v1/agent/status", agentEndpoint)
+	url := fmt.Sprintf("http://%s:%d/api/v1/agent/status", agentIP, c.agentPort)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {

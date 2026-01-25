@@ -57,7 +57,6 @@ Examples:
 			Labels:    make(map[string]string),
 		}
 
-		// 解析 --expire-time
 		if cmd.Flags().Changed("expire-time") {
 			seconds, err := parseExpireTime(updateExpireTime)
 			if err != nil {
@@ -68,7 +67,6 @@ Examples:
 			}
 		}
 
-		// 解析 --failure-policy
 		if cmd.Flags().Changed("failure-policy") {
 			policy, err := parseFailurePolicy(updateFailurePolicy)
 			if err != nil {
@@ -79,14 +77,12 @@ Examples:
 			}
 		}
 
-		// 解析 --recovery-timeout
 		if cmd.Flags().Changed("recovery-timeout") {
 			req.Update = &fastpathv1.UpdateRequest_RecoveryTimeoutSeconds{
 				RecoveryTimeoutSeconds: updateRecoveryTimeout,
 			}
 		}
 
-		// 解析 --labels
 		if len(updateLabels) > 0 {
 			for _, label := range updateLabels {
 				parts := strings.SplitN(label, "=", 2)
@@ -97,7 +93,6 @@ Examples:
 			}
 		}
 
-		// 检查是否至少有一个更新操作
 		if req.Update == nil && len(req.Labels) == 0 {
 			log.Fatal("Error: at least one update field must be specified (--expire-time, --failure-policy, --recovery-timeout, or --labels)")
 		}
@@ -128,17 +123,11 @@ func init() {
 	updateCmd.Flags().StringSliceVar(&updateLabels, "labels", []string{}, "Labels to set (key=value format)")
 }
 
-// parseExpireTime 解析过期时间参数
-// 支持格式：
-//   - "0" - 移除过期时间
-//   - 数字 - Unix 时间戳
 func parseExpireTime(input string) (int64, error) {
-	// 检查是否为 "0" (移除过期)
 	if input == "0" {
 		return 0, nil
 	}
 
-	// 尝试解析为数字 (Unix 时间戳)
 	seconds, err := strconv.ParseInt(input, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid timestamp format: %w", err)
@@ -147,7 +136,6 @@ func parseExpireTime(input string) (int64, error) {
 	return seconds, nil
 }
 
-// parseFailurePolicy 解析故障策略
 func parseFailurePolicy(input string) (fastpathv1.FailurePolicy, error) {
 	switch strings.ToLower(input) {
 	case "manual":

@@ -86,7 +86,7 @@ spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
   poolRef: finalizer-test-pool
-  exposedPorts: [8081]
+  exposedPorts: [5758]
 EOF
 
     # 等待 Sandbox B 运行

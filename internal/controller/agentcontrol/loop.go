@@ -2,7 +2,6 @@ package agentcontrol
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -38,7 +37,6 @@ func (l *Loop) Start(ctx context.Context) {
 	ticker := time.NewTicker(l.Interval)
 	defer ticker.Stop()
 
-	// 用于检测同步是否正在进行
 	syncInProgress := false
 	var syncMu sync.Mutex
 
@@ -57,7 +55,6 @@ func (l *Loop) Start(ctx context.Context) {
 			syncInProgress = true
 			syncMu.Unlock()
 
-			// 在 goroutine 中执行 sync，防止阻塞主循环
 			go func() {
 				defer func() {
 					syncMu.Lock()
@@ -79,22 +76,16 @@ func (l *Loop) Start(ctx context.Context) {
 }
 
 const (
-	// perAgentTimeout 是单个 Agent 探测的超时时间
-	// 优化: 从 2s 增加到 5s，配合锁优化提供更合理的超时容忍
-	perAgentTimeout = 5 * time.Second
-	// staleAgentTimeout 是 Agent 心跳超时时间，超过此时间未更新的 Agent 会被清理
-	// 设置为 15 秒，以便在测试中快速验证 Agent 丢失场景
+	perAgentTimeout   = 5 * time.Second
 	staleAgentTimeout = 15 * time.Second
 )
 
 func (l *Loop) syncOnce(ctx context.Context) error {
 	logger := ctrl.Log.WithName("agent-control-loop")
 
-	// 设置整体同步超时，防止单个同步周期过长
 	syncCtx, cancel := context.WithTimeout(ctx, l.Interval*2)
 	defer cancel()
 
-	// 1. List all Agent Pods
 	var podList corev1.PodList
 	if err := l.Client.List(syncCtx, &podList, client.MatchingLabels{"app": "sandbox-agent"}); err != nil {
 		return err
@@ -102,8 +93,6 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 
 	seenAgents := make(map[agentpool.AgentID]bool)
 
-	// 使用 errgroup 或 WaitGroup 可以并发探测，但为了保持原有行为，我们顺序探测
-	// 但每个 agent 探测都有独立的超时
 	for _, pod := range podList.Items {
 		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
 			continue
@@ -112,11 +101,8 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		agentID := agentpool.AgentID(pod.Name)
 		seenAgents[agentID] = true
 
-		// 2. Probe Agent with per-agent timeout
-		endpoint := fmt.Sprintf("%s:8081", pod.Status.PodIP)
-
 		agentCtx, agentCancel := context.WithTimeout(syncCtx, perAgentTimeout)
-		status, err := l.AgentClient.GetAgentStatusWithContext(agentCtx, endpoint)
+		status, err := l.AgentClient.GetAgentStatus(agentCtx, pod.Status.PodIP)
 		agentCancel()
 
 		if err != nil {
@@ -124,7 +110,6 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 			continue
 		}
 
-		// 3. Update Registry (Keep existing Allocated count)
 		sbStatuses := make(map[string]api.SandboxStatus)
 		for _, s := range status.SandboxStatuses {
 			sbStatuses[s.SandboxID] = s
@@ -145,9 +130,7 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		l.Registry.RegisterOrUpdate(info)
 	}
 
-	// 4. Cleanup stale agents (Pods that were deleted)
 	allAgents := l.Registry.GetAllAgents()
-	//logger.Info("Agent control loop: checking for stale agents", "totalAgents", len(allAgents), "seenAgents", len(seenAgents))
 	for _, a := range allAgents {
 		if !seenAgents[a.ID] {
 			logger.Info("Removing stale agent from registry (Pod not found)", "agent", a.ID, "pool", a.PoolName)
@@ -155,12 +138,9 @@ func (l *Loop) syncOnce(ctx context.Context) error {
 		}
 	}
 
-	// 5. 基于时间清理长期未更新的 Agent（防止内存泄漏）
-	// 这是额外的安全网，捕获那些 Pod 仍存在但 Agent 宕机的情况
 	cleaned := l.Registry.CleanupStaleAgents(staleAgentTimeout)
 	if cleaned > 0 {
 		logger.Info("Cleaned up stale agents by heartbeat timeout", "count", cleaned)
 	}
-
 	return nil
 }

@@ -51,9 +51,9 @@ EOF
     PF_PID=$!
     wait_for_condition "nc -z localhost 9090" 15 "Port-forward ready"
 
-    echo "  通过 Fast-Path (Fast 模式) 创建 Sandbox B (端口 8081)..."
+    echo "  通过 Fast-Path (Fast 模式) 创建 Sandbox B (端口 5758)..."
     # 使用新参数 --name，添加默认命令 /bin/sleep 3600
-    OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=8081 --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
+    OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=5758 --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
         SB_B=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
         echo "  ✓ Fast-Path 创建成功: $SB_B"

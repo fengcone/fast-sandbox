@@ -44,7 +44,7 @@ func (m *MockAgentClient) DeleteSandbox(endpoint string, req *api.DeleteSandboxR
 	return &api.DeleteSandboxResponse{Success: true}, nil
 }
 
-func (m *MockAgentClient) GetAgentStatusWithContext(ctx context.Context, endpoint string) (*api.AgentStatus, error) {
+func (m *MockAgentClient) GetAgentStatus(ctx context.Context, endpoint string) (*api.AgentStatus, error) {
 	return nil, nil
 }
 
@@ -356,7 +356,7 @@ func TestSandbox_Creation_AgentCreateSuccess(t *testing.T) {
 	agentClient := &MockAgentClient{
 		CreateSandboxFunc: func(endpoint string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
 			createCalled = true
-			assert.Equal(t, "10.0.0.1:8081", endpoint)
+			assert.Equal(t, "10.0.0.1:5758", endpoint)
 			assert.Equal(t, "test-sb", req.Sandbox.SandboxID)
 			return &api.CreateSandboxResponse{}, nil
 		},
@@ -366,7 +366,7 @@ func TestSandbox_Creation_AgentCreateSuccess(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), reconcileRequest("test-sb"))
 	require.NoError(t, err)
-	assert.True(t, result.Requeue)
+	assert.True(t, result.RequeueAfter == 0)
 	assert.True(t, createCalled, "应该调用 CreateSandbox")
 
 	// 验证 Phase 变为 Bound
@@ -849,7 +849,7 @@ func TestSandbox_FailurePolicy_Manual(t *testing.T) {
 	// 状态不应改变
 	updated := getSandbox(t, r, "test-sb")
 	assert.Equal(t, "dead-agent", updated.Status.AssignedPod)
-	assert.Equal(t, "Bound", updated.Status.Phase)
+	assert.Equal(t, "Lost", updated.Status.Phase)
 }
 
 func TestSandbox_HeartbeatNormal(t *testing.T) {

@@ -37,12 +37,11 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// 全局 Flag
+	//  Flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./.fsb/config.json)")
 	rootCmd.PersistentFlags().StringVar(&endpoint, "endpoint", "localhost:9090", "Controller gRPC endpoint")
 	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "default", "Kubernetes namespace")
 
-	// 绑定 Flag 到 Viper
 	viper.BindPFlag("endpoint", rootCmd.PersistentFlags().Lookup("endpoint"))
 	viper.BindPFlag("namespace", rootCmd.PersistentFlags().Lookup("namespace"))
 }
@@ -52,9 +51,7 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// 1. 查找当前目录 .fsb
 		viper.AddConfigPath("./.fsb")
-		// 2. 查找用户目录 .fsb
 		home, err := os.UserHomeDir()
 		if err == nil {
 			viper.AddConfigPath(home + "/.fsb")
@@ -65,17 +62,14 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 
-	// 如果找到配置文件，则读取
 	if err := viper.ReadInConfig(); err == nil {
-		//fmt.Println("Using config file:", viper.ConfigFileUsed())
+		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
 }
 
-// ClientFactory 允许在测试中替换 gRPC 客户端
-var ClientFactory = defaultClientFactory
+var clientFactory = defaultClientFactory
 
 func defaultClientFactory() (fastpathv1.FastPathServiceClient, *grpc.ClientConn, error) {
-	// 优先从 Viper 获取配置（Flag > Config > Default）
 	ep := viper.GetString("endpoint")
 
 	conn, err := grpc.Dial(ep, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -85,9 +79,8 @@ func defaultClientFactory() (fastpathv1.FastPathServiceClient, *grpc.ClientConn,
 	return fastpathv1.NewFastPathServiceClient(conn), conn, nil
 }
 
-// Helper: 获取 gRPC 客户端
 func getClient() (fastpathv1.FastPathServiceClient, *grpc.ClientConn) {
-	client, conn, err := ClientFactory()
+	client, conn, err := clientFactory()
 	if err != nil {
 		log.Fatalf("Error: %v", err)
 	}

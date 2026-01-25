@@ -388,8 +388,8 @@ func (r *SandboxReconciler) reconcilePending(ctx context.Context, sandbox *apiv1
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Sandbox created on agent, transitioning to Bound")
-	return ctrl.Result{Requeue: true}, nil
+	logger.Info("Sandbox created on agent, transitioning to Bound", "sandbox", sandbox.Name)
+	return ctrl.Result{RequeueAfter: 0}, nil
 }
 
 // reconcileRunning handles sandboxes in Bound/Running phase.
@@ -554,8 +554,7 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 		return fmt.Errorf("agent %s not found in registry", sandbox.Status.AssignedPod)
 	}
 
-	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
-	_, err := r.AgentClient.CreateSandbox(endpoint, &api.CreateSandboxRequest{
+	_, err := r.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  sandbox.Name,
 			ClaimName:  sandbox.Name,
@@ -578,8 +577,7 @@ func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1a
 		return nil
 	}
 
-	endpoint := fmt.Sprintf("%s:8081", agent.PodIP)
-	_, err := r.AgentClient.DeleteSandbox(endpoint, &api.DeleteSandboxRequest{
+	_, err := r.AgentClient.DeleteSandbox(agent.PodIP, &api.DeleteSandboxRequest{
 		SandboxID: sandbox.Name,
 	})
 

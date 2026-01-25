@@ -40,10 +40,12 @@ func init() {
 func main() {
 	var metricsAddr string
 	var probeAddr string
+	var agentPort int
 	var fastpathConsistencyMode string
 	var fastpathOrphanTimeout time.Duration
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.IntVar(&agentPort, "agent-port", 5758, "The port the agent server binds to.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":9091", "The address the metric endpoint binds to.")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":5758", "The address the probe endpoint binds to.")
 	flag.StringVar(&fastpathConsistencyMode, "fastpath-consistency-mode", "fast", "Fast-Path consistency mode: fast (default) or strong")
 	flag.DurationVar(&fastpathOrphanTimeout, "fastpath-orphan-timeout", 10*time.Second, "Fast-Path orphan cleanup timeout (for Fast mode)")
 
@@ -66,7 +68,7 @@ func main() {
 	}
 
 	reg := agentpool.NewInMemoryRegistry()
-	agentHTTPClient := api.NewAgentClient()
+	agentHTTPClient := api.NewAgentClient(agentPort)
 	if err = (&controller.SandboxReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
@@ -87,12 +89,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 启动 AgentControlLoop
 	ctx := ctrl.SetupSignalHandler()
 	loop := agentcontrol.NewLoop(mgr.GetClient(), reg, agentHTTPClient)
 	go loop.Start(ctx)
 
-	// --- 1. 启动 Fast-Path gRPC Server ---
 	lis, err := net.Listen("tcp", ":9090")
 	if err != nil {
 		setupLog.Error(err, "failed to listen on port 9090 for fast-path")
@@ -100,7 +100,6 @@ func main() {
 	}
 	grpcServer := grpc.NewServer()
 
-	// 解析一致性模式
 	consistencyMode := api.ConsistencyModeFast
 	if fastpathConsistencyMode == "strong" {
 		consistencyMode = api.ConsistencyModeStrong
@@ -130,9 +129,7 @@ func main() {
 
 	setupLog.Info("starting manager")
 
-	// 崩溃恢复：在启动 Manager 之后，异步执行一次性状态恢复
 	go func() {
-		// 等待缓存同步
 		if mgr.GetCache().WaitForCacheSync(context.Background()) {
 			setupLog.Info("Cache synced, restoring registry state from cluster")
 			if err := reg.Restore(context.Background(), mgr.GetClient()); err != nil {

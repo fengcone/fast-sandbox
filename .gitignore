@@ -261,3 +261,5 @@ nbdist/
 # Generated files
 generated/
 **/generated/**
+
+/docs

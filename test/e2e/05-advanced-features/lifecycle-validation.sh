@@ -72,7 +72,7 @@ EOF
             # CRD 已删除，验证容器也被删除（通过 Agent HTTP API）
             # 通过 port-forward 访问 Agent HTTP API 检查容器
             AGENT_PF_PORT=$((10000 + RANDOM % 1000))
-            kubectl port-forward "pod/$AGENT_POD" -n "$TEST_NS" "$AGENT_PF_PORT:8081" >/dev/null 2>&1 &
+            kubectl port-forward "pod/$AGENT_POD" -n "$TEST_NS" "$AGENT_PF_PORT:5758" >/dev/null 2>&1 &
             AGENT_PF_PID=$!
             sleep 1
 

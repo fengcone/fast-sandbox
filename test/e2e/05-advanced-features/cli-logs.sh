@@ -95,7 +95,7 @@ EOF
     fi
 
     echo "  Agent Pod: $AGENT_POD"
-    kubectl port-forward "pod/$AGENT_POD" -n "$TEST_NS" "$PF_PORT:8081" >/dev/null 2>&1 &
+    kubectl port-forward "pod/$AGENT_POD" -n "$TEST_NS" "$PF_PORT:5758" >/dev/null 2>&1 &
     PF_PID=$!
 
     # 等待端口就绪

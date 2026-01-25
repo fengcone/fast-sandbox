@@ -5,13 +5,17 @@ COPY bin/agent .
 
 # Final stage
 FROM alpine:3.19
+#FROM golang:1.25
+# for debug
+#RUN go install github.com/go-delve/delve/cmd/dlv@latest
+#EXPOSE 2345
 WORKDIR /workspace
 COPY --from=builder /workspace/agent .
 
 # Default envs; can be overridden by Pod spec
-ENV AGENT_PORT=":8081"
+ENV AGENT_PORT=":5758"
 ENV RUNTIME_TYPE="container"
 ENV RUNTIME_SOCKET="/run/containerd/containerd.sock"
 
-EXPOSE 8081
+EXPOSE 5758
 ENTRYPOINT ["./agent"]

@@ -47,7 +47,7 @@ EOF
     echo "  ✓ 端口 0 被正确拒绝"
     kubectl delete sandbox $SB_NAME_0 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
-    # 测试2: 端口 8081 应该成功
+    # 测试2: 端口 5758 应该成功
     SB_NAME_1="sb-port-valid-1-$RANDOM"
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
@@ -58,17 +58,17 @@ spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "60"]
   poolRef: port-validation-pool
-  exposedPorts: [8081]
+  exposedPorts: [5758]
 EOF
 
     # 等待 Sandbox 分配并运行
-    if ! wait_for_condition "kubectl get sandbox $SB_NAME_1 -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox with port 8081 running"; then
+    if ! wait_for_condition "kubectl get sandbox $SB_NAME_1 -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE 'running|bound'" 30 "Sandbox with port 5758 running"; then
         PHASE=$(kubectl get sandbox $SB_NAME_1 -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        echo "  ❌ 端口 8081 被错误拒绝，phase: $PHASE"
+        echo "  ❌ 端口 5758 被错误拒绝，phase: $PHASE"
         kubectl delete sandbox $SB_NAME_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
     fi
-    echo "  ✓ 端口 8081 被正确接受"
+    echo "  ✓ 端口 5758 被正确接受"
     kubectl delete sandbox $SB_NAME_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 测试3: 端口 65535 应该成功

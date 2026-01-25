@@ -51,7 +51,6 @@ func (s *AgentServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	follow := r.URL.Query().Get("follow") == "true"
 
-	// 支持流式输出
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -59,14 +58,12 @@ func (s *AgentServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	// 使用 FlushWriter 包装 ResponseWriter，确保每写一行都 Flush
 	fw := &flushWriter{w: w}
 	if f, ok := w.(http.Flusher); ok {
 		fw.f = f
 	}
 
 	if err := s.sandboxManager.GetLogs(r.Context(), sandboxID, follow, fw); err != nil {
-		// 如果已经写过 Header，这里的 Error 可能客户端收不到，只能记录日志
 		log.Printf("GetLogs failed: %v", err)
 		return
 	}
@@ -98,7 +95,7 @@ func (s *AgentServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.sandboxManager.CreateSandbox(r.Context(), req.Sandbox)
+	resp, err := s.sandboxManager.CreateSandbox(r.Context(), &req.Sandbox)
 	if err != nil {
 		log.Printf("Create sandbox failed: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -124,7 +121,7 @@ func (s *AgentServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.sandboxManager.DeleteSandbox(r.Context(), req.SandboxID)
+	resp, err := s.sandboxManager.DeleteSandbox(req.SandboxID)
 	if err != nil {
 		log.Printf("Delete sandbox failed: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -144,20 +141,13 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Get Images
 	images, err := s.sandboxManager.ListImages(r.Context())
 	if err != nil {
 		log.Printf("Warning: failed to list images: %v", err)
-		// Don't fail the whole request, just return empty images
 		images = []string{}
 	}
-
-	// 2. Get Sandbox Statuses (包含 phase 信息: running/terminating/terminated)
-	sbStatuses := s.sandboxManager.GetAllSandboxStatuses(r.Context())
-
-	// Node Name from Env
+	sbStatuses := s.sandboxManager.GetSandboxStatuses(r.Context())
 	nodeName := os.Getenv("NODE_NAME")
-
 	status := api.AgentStatus{
 		AgentID:         os.Getenv("POD_NAME"), // Use Pod Name as Agent ID
 		NodeName:        nodeName,

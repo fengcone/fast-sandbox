@@ -304,3 +304,68 @@ wait_for_condition() {
     done
     echo "❌ $msg: timeout"; return 1
 }
+
+# --- 9. 运行所有测试套件 (直接执行 common.sh 时触发) ---
+# 用法: ./test/e2e/common.sh [filter]
+run_all_suites() {
+    local filter=$1
+    local total=0
+    local passed=0
+    local failed=()
+
+    echo ""
+    echo "========================================"
+    echo "🚀 运行所有 E2E 测试套件"
+    echo "========================================"
+
+    for suite in "$COMMON_DIR"/0*/test.sh; do
+        if [ ! -f "$suite" ]; then
+            continue
+        fi
+
+        local suite_name=$(basename "$(dirname "$suite")")
+
+        # 过滤逻辑
+        if [ -n "$filter" ] && [[ "$suite_name" != *"$filter"* ]]; then
+            continue
+        fi
+
+        total=$((total + 1))
+        echo ""
+        echo "▶ 运行套件: $suite_name"
+        echo "----------------------------------------"
+
+        if bash "$suite"; then
+            passed=$((passed + 1))
+        else
+            failed+=("$suite_name")
+        fi
+    done
+
+    # 最终汇总
+    echo ""
+    echo "========================================"
+    echo "📊 E2E 测试最终汇总"
+    echo "----------------------------------------"
+    echo "总套件数: $total"
+    echo "✅ 通过: $passed"
+
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo "❌ 失败: ${#failed[@]}"
+        echo ""
+        echo "失败的套件:"
+        for name in "${failed[@]}"; do
+            echo "  - $name"
+        done
+        exit 1
+    fi
+
+    echo ""
+    echo "🎉 所有测试通过！"
+    exit 0
+}
+
+# 当直接执行 common.sh 时，运行所有套件
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    run_all_suites "$1"
+fi

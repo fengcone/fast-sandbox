@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -26,7 +28,6 @@ var logsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
 
-		// 1. 获取 Sandbox 信息以找到 Agent
 		client, conn := getClient()
 		if conn != nil {
 			defer conn.Close()
@@ -44,10 +45,7 @@ var logsCmd = &cobra.Command{
 			log.Fatal("Sandbox is not assigned to any agent yet.")
 		}
 
-		// 2. 建立连接通道
-		// 尝试直连 Agent IP (集群内或扁平网络)
-		// 但通常外网无法访问 Pod IP。我们采用 port-forward 策略作为兜底。
-
+		// todo add proxy for agent
 		localPort, pfCmd, err := startPortForward(info.AgentPod, viper.GetString("namespace"))
 		if err != nil {
 			log.Fatalf("Failed to start port-forward: %v", err)
@@ -58,7 +56,6 @@ var logsCmd = &cobra.Command{
 			}
 		}()
 
-		// 3. 发起 HTTP 请求
 		url := fmt.Sprintf("http://localhost:%d/api/v1/agent/logs?sandboxId=%s&follow=%t", localPort, name, follow)
 		resp, err := http.Get(url)
 		if err != nil {
@@ -71,8 +68,6 @@ var logsCmd = &cobra.Command{
 			log.Fatalf("Agent returned error: %s", string(body))
 		}
 
-		// 4. 流式拷贝日志到 Stdout
-		// 捕获中断信号以优雅退出
 		go func() {
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt)
@@ -82,8 +77,7 @@ var logsCmd = &cobra.Command{
 		}()
 
 		if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
-			// io.Copy 可能会因为连接断开报错，正常退出时不应报错
-			if err != io.EOF && err != io.ErrUnexpectedEOF {
+			if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
 				log.Printf("Log stream ended: %v", err)
 			}
 		}
@@ -95,9 +89,8 @@ func init() {
 	logsCmd.Flags().BoolVarP(&follow, "follow", "f", false, "Specify if the logs should be streamed")
 }
 
-// startPortForward 启动 kubectl port-forward
+// startPortForward start kubectl port-forward
 func startPortForward(podName, namespace string) (int, *exec.Cmd, error) {
-	// 获取一个随机空闲端口
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return 0, nil, err
@@ -107,7 +100,8 @@ func startPortForward(podName, namespace string) (int, *exec.Cmd, error) {
 
 	fmt.Printf("Forwarding local port %d to pod %s...\n", port, podName)
 
-	cmd := exec.Command("kubectl", "port-forward", fmt.Sprintf("pod/%s", podName), fmt.Sprintf("%d:8081", port), "-n", namespace)
+	// todo change port
+	cmd := exec.Command("kubectl", "port-forward", fmt.Sprintf("pod/%s", podName), fmt.Sprintf("%d:5758", port), "-n", namespace)
 	cmd.Stdout = os.Stdout // Debug usage
 	cmd.Stderr = os.Stderr
 
@@ -115,7 +109,6 @@ func startPortForward(podName, namespace string) (int, *exec.Cmd, error) {
 		return 0, nil, err
 	}
 
-	// 等待端口就绪 (最多等待 5s)
 	for i := 0; i < 50; i++ {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 100*time.Millisecond)
 		if err == nil {

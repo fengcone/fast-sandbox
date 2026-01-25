@@ -31,7 +31,7 @@ preserving the sandbox configuration.`,
 		sandboxID := args[0]
 		namespace := viper.GetString("namespace")
 
-		// 使用当前时间作为 ResetRevision
+		// set cur time as ResetRevision
 		resetRevision := time.Now().Format(time.RFC3339Nano)
 
 		req := &fastpathv1.UpdateRequest{

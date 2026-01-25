@@ -62,8 +62,7 @@ type DeleteSandboxResponse struct {
 
 // AgentStatus represents the current status of an agent (internal use).
 type AgentStatus struct {
-	AgentID string `json:"agentId"`
-	// contained的实现是k8s 的node，其他实现如果不能共享image，那么应当将pod name 作为 nodeName ，以便让Controller 进行调度
+	AgentID         string          `json:"agentId"`
 	NodeName        string          `json:"nodeName"`
 	Capacity        int             `json:"capacity"`
 	Allocated       int             `json:"allocated"`

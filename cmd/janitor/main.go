@@ -43,7 +43,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 1. 初始化 K8s 客户端
 	var config *rest.Config
 	var err error
 	if kubeconfig != "" {
@@ -62,7 +61,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 初始化通用客户端以支持 CRD
 	scheme := runtime.NewScheme()
 	apiv1alpha1.AddToScheme(scheme)
 	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
@@ -71,7 +69,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 2. 初始化 Containerd 客户端
 	ctrdClient, err := containerd.New(ctrdSocket)
 	if err != nil {
 		logger.Error(err, "Failed to connect to containerd")
@@ -79,7 +76,6 @@ func main() {
 	}
 	defer ctrdClient.Close()
 
-	// 3. 启动 Janitor
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

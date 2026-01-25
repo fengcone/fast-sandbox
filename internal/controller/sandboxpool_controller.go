@@ -33,13 +33,10 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 1. 获取该 Pool 下所有的 Agent Pods
 	var childPods corev1.PodList
 	if err := r.List(ctx, &childPods, client.InNamespace(req.Namespace), client.MatchingLabels(poolLabels(pool.Name))); err != nil {
 		return ctrl.Result{}, err
 	}
-
-	// 2. 获取该 Pool 下所有的 Sandboxes，用于计算负载
 	var allSandboxes apiv1alpha1.SandboxList
 	if err := r.List(ctx, &allSandboxes, client.InNamespace(req.Namespace)); err != nil {
 		return ctrl.Result{}, err
@@ -47,7 +44,6 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	var activeCount, pendingCount int32
 	for _, sb := range allSandboxes.Items {
-		// 只有属于这个池子的才统计
 		if sb.Spec.PoolRef == pool.Name {
 			if sb.Status.AssignedPod != "" {
 				activeCount++
@@ -58,17 +54,14 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	//logger.Info("Load statistics", "pool", pool.Name, "active", activeCount, "pending", pendingCount)
 
-	// 3. 动态计算所需 Pod 数量
 	maxPerPod := getAgentCapacity(&pool)
 	if maxPerPod <= 0 {
 		maxPerPod = 1
 	}
 
-	// 总需求量 = 正在跑的 + 正在排队的 + 最小缓冲区
 	totalNeededSlots := activeCount + pendingCount + pool.Spec.Capacity.BufferMin
 	desiredPods := (totalNeededSlots + maxPerPod - 1) / maxPerPod
 
-	// 4. 应用 PoolMin / PoolMax 约束
 	if desiredPods < pool.Spec.Capacity.PoolMin {
 		desiredPods = pool.Spec.Capacity.PoolMin
 	}
@@ -79,7 +72,6 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	currentCount := int32(len(childPods.Items))
 	//logger.Info("Scaling analysis", "pool", pool.Name, "current", currentCount, "desired", desiredPods)
 
-	// 5. 执行扩缩容
 	if currentCount < desiredPods {
 		diff := desiredPods - currentCount
 		logger.Info("Scaling up agent pool", "diff", diff)
@@ -93,7 +85,6 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	} else if currentCount > desiredPods {
 		diff := currentCount - desiredPods
 		logger.Info("Scaling down agent pool", "diff", diff)
-		// 简单删除
 		for i := int32(0); i < diff; i++ {
 			pod := childPods.Items[i]
 			if err := r.Delete(ctx, &pod); err != nil {
@@ -103,7 +94,6 @@ func (r *SandboxPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// 6. 更新 Status
 	pool.Status.CurrentPods = currentCount
 	pool.Status.TotalAgents = currentCount
 	if err := r.Status().Update(ctx, &pool); err != nil {
@@ -125,7 +115,7 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 
 	podSpec := pool.Spec.AgentTemplate.Spec.DeepCopy()
 	podSpec.HostNetwork = false
-	podSpec.HostPID = false // 禁用宿主机 PID 命名空间，提高安全性
+	podSpec.HostPID = false
 
 	if len(podSpec.Containers) > 0 {
 		c := &podSpec.Containers[0]
@@ -182,27 +172,19 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			corev1.VolumeMount{Name: "infra-tools", MountPath: "/opt/fast-sandbox/infra"},
 		)
 
-		if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
-			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
-				Name:      "kvm",
-				MountPath: "/dev/kvm",
-			})
-		}
 	}
 
 	podSpec.InitContainers = append(podSpec.InitContainers, corev1.Container{
 		Name:            "infra-init",
 		Image:           "alpine:latest",
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		// 使用 heredoc 确保脚本格式完美
-		Command: []string{"sh", "-c", "cat <<'EOF' > /opt/fast-sandbox/infra/fs-helper\n#!/bin/sh\necho [FS-INFRA] Helper Initiated\nexec \"$@\"\nEOF\nchmod +x /opt/fast-sandbox/infra/fs-helper"},
+		Command:         []string{"sh", "-c", "cat <<'EOF' > /opt/fast-sandbox/infra/fs-helper\n#!/bin/sh\necho [FS-INFRA] Helper Initiated\nexec \"$@\"\nEOF\nchmod +x /opt/fast-sandbox/infra/fs-helper"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "infra-tools", MountPath: "/opt/fast-sandbox/infra"},
 		},
 	})
 
 	hostPathDirectory := corev1.HostPathDirectory
-	hostPathFile := corev1.HostPathCharDev
 
 	podSpec.Volumes = append(podSpec.Volumes,
 		corev1.Volume{
@@ -224,15 +206,6 @@ func (r *SandboxPoolReconciler) constructPod(pool *apiv1alpha1.SandboxPool) *cor
 			},
 		},
 	)
-
-	if pool.Spec.RuntimeType == apiv1alpha1.RuntimeFirecracker {
-		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "kvm",
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{Path: "/dev/kvm", Type: &hostPathFile},
-			},
-		})
-	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -272,7 +245,6 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
-// SetupWithManager sets up the controller with the Manager.
 func (r *SandboxPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1alpha1.SandboxPool{}).
@@ -282,7 +254,6 @@ func (r *SandboxPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !ok {
 				return nil
 			}
-			// 对于删除事件，obj 仍然包含被删除对象的信息
 			if sandbox.Spec.PoolRef != "" {
 				return []ctrl.Request{
 					{NamespacedName: client.ObjectKey{Name: sandbox.Spec.PoolRef, Namespace: sandbox.Namespace}},

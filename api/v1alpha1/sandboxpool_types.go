@@ -11,9 +11,8 @@ import (
 type RuntimeType string
 
 const (
-	RuntimeContainer   RuntimeType = "container"
-	RuntimeFirecracker RuntimeType = "firecracker"
-	RuntimeGVisor      RuntimeType = "gvisor"
+	RuntimeContainer RuntimeType = "container"
+	RuntimeGVisor    RuntimeType = "gvisor"
 )
 
 // SandboxPoolSpec defines the desired state of SandboxPool.
