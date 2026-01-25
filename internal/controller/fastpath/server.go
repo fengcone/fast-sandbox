@@ -88,7 +88,18 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 }
 
 func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
-	_, err := s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
+	start := time.Now()
+	var err error
+	defer func() {
+		duration := time.Since(start).Seconds()
+		success := "true"
+		if err != nil {
+			success = "false"
+		}
+		createSandboxDuration.WithLabelValues("fast", success).Observe(duration)
+	}()
+
+	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  tempSB.Name,
 			ClaimName:  tempSB.Name,
@@ -110,12 +121,23 @@ func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, ag
 }
 
 func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
-	if err := s.K8sClient.Create(ctx, tempSB); err != nil {
+	start := time.Now()
+	var err error
+	defer func() {
+		duration := time.Since(start).Seconds()
+		success := "true"
+		if err != nil {
+			success = "false"
+		}
+		createSandboxDuration.WithLabelValues("strong", success).Observe(duration)
+	}()
+
+	if err = s.K8sClient.Create(ctx, tempSB); err != nil {
 		s.Registry.Release(agent.ID, tempSB)
 		return nil, err
 	}
 
-	_, err := s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
+	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
 			SandboxID:  tempSB.Name,
 			ClaimUID:   string(tempSB.UID),
