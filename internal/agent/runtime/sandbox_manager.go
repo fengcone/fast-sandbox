@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"fast-sandbox/internal/api"
+
+	"k8s.io/klog/v2"
 )
 
 type SandboxManager struct {
@@ -19,6 +20,8 @@ type SandboxManager struct {
 	capacity int
 	// sandboxes  sandboxID -> metadata
 	sandboxes map[string]*SandboxMetadata
+	// terminatedSandboxes  sandboxID -> deletion time (for Controller confirmation)
+	terminatedSandboxes map[string]int64
 }
 
 func NewSandboxManager(runtime Runtime) *SandboxManager {
@@ -29,9 +32,10 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 		}
 	}
 	return &SandboxManager{
-		runtime:   runtime,
-		capacity:  capVal,
-		sandboxes: make(map[string]*SandboxMetadata),
+		runtime:             runtime,
+		capacity:            capVal,
+		sandboxes:           make(map[string]*SandboxMetadata),
+		terminatedSandboxes: make(map[string]int64),
 	}
 }
 
@@ -40,7 +44,7 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec *api.SandboxSpe
 	_, exists := m.sandboxes[spec.SandboxID]
 	m.mu.RUnlock()
 	if exists {
-		log.Printf("Sandbox %s already exists in cache, returning success (idempotent)", spec.SandboxID)
+		klog.InfoS("Sandbox already exists in cache, returning success (idempotent)", "sandbox", spec.SandboxID)
 		return &api.CreateSandboxResponse{
 			Success:   true,
 			SandboxID: spec.SandboxID,
@@ -49,7 +53,7 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec *api.SandboxSpe
 	createdAt := time.Now().Unix()
 	metadata, err := m.runtime.CreateSandbox(ctx, spec)
 	if err != nil {
-		log.Printf("Failed to create sandbox %s: %v", spec.SandboxID, err)
+		klog.ErrorS(err, "Failed to create sandbox", "sandbox", spec.SandboxID)
 		go m.asyncDelete(spec.SandboxID)
 		return &api.CreateSandboxResponse{
 			Success: false,
@@ -60,7 +64,7 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec *api.SandboxSpe
 	metadata.Phase = "running"
 	m.sandboxes[spec.SandboxID] = metadata
 	m.mu.Unlock()
-	log.Printf("Created sandbox %s (image: %s)", spec.SandboxID, spec.Image)
+	klog.InfoS("Created sandbox", "sandbox", spec.SandboxID, "image", spec.Image)
 	return &api.CreateSandboxResponse{
 		Success:   true,
 		SandboxID: spec.SandboxID,
@@ -73,7 +77,7 @@ func (m *SandboxManager) DeleteSandbox(sandboxID string) (*api.DeleteSandboxResp
 	sandbox, ok := m.sandboxes[sandboxID]
 	if ok && sandbox.Phase == "terminating" {
 		m.mu.Unlock()
-		log.Printf("Sandbox %s is already terminating, returning success (idempotent)", sandboxID)
+		klog.InfoS("Sandbox is already terminating, returning success (idempotent)", "sandbox", sandboxID)
 		return &api.DeleteSandboxResponse{
 			Success: true,
 		}, nil
@@ -81,7 +85,7 @@ func (m *SandboxManager) DeleteSandbox(sandboxID string) (*api.DeleteSandboxResp
 	sandbox.Phase = "terminating"
 	m.mu.Unlock()
 	go m.asyncDelete(sandboxID)
-	log.Printf("Sandbox %s marked for deletion (async graceful shutdown)", sandboxID)
+	klog.InfoS("Sandbox marked for deletion (async graceful shutdown)", "sandbox", sandboxID)
 	return &api.DeleteSandboxResponse{
 		Success: true,
 	}, nil
@@ -92,10 +96,12 @@ func (m *SandboxManager) asyncDelete(sandboxID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), gracefulTimeout+5*time.Second)
 	defer cancel()
 	err := m.runtime.DeleteSandbox(ctx, sandboxID)
-	log.Printf("Sandbox %s deletion completed, err: %v", sandboxID, err)
+	klog.InfoS("Sandbox deletion completed", "sandbox", sandboxID, "err", err)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Move to terminated sandboxes for Controller confirmation
 	delete(m.sandboxes, sandboxID)
+	m.terminatedSandboxes[sandboxID] = time.Now().Unix()
 }
 
 func (m *SandboxManager) GetLogs(ctx context.Context, sandboxID string, follow bool, w io.Writer) error {
@@ -111,13 +117,12 @@ func (m *SandboxManager) GetCapacity() int {
 
 func (m *SandboxManager) GetSandboxStatuses(ctx context.Context) []api.SandboxStatus {
 	m.mu.RLock()
-	snapshots := make(map[string]*SandboxMetadata)
-	for id, meta := range m.sandboxes {
-		snapshots[id] = meta
-	}
-	m.mu.RUnlock()
-	result := make([]api.SandboxStatus, 0, len(snapshots))
-	for sandboxID, meta := range snapshots {
+	defer m.mu.RUnlock()
+
+	result := make([]api.SandboxStatus, 0)
+
+	// Add active sandboxes
+	for sandboxID, meta := range m.sandboxes {
 		runtimeStatus, _ := m.runtime.GetSandboxStatus(ctx, sandboxID)
 		result = append(result, api.SandboxStatus{
 			SandboxID: sandboxID,
@@ -127,6 +132,17 @@ func (m *SandboxManager) GetSandboxStatuses(ctx context.Context) []api.SandboxSt
 			CreatedAt: meta.CreatedAt,
 		})
 	}
+
+	// Add terminated sandboxes (for Controller confirmation)
+	for sandboxID, deletedAt := range m.terminatedSandboxes {
+		result = append(result, api.SandboxStatus{
+			SandboxID: sandboxID,
+			Phase:     "terminated",
+			Message:   "",
+			CreatedAt: deletedAt,
+		})
+	}
+
 	return result
 }
 

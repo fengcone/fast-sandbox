@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
-	"log"
+	"flag"
 	"os"
+
+	"k8s.io/klog/v2"
 
 	"fast-sandbox/internal/agent/runtime"
 	"fast-sandbox/internal/agent/server"
 )
 
 func main() {
-	log.Println("starting sandbox agent")
+	flag.Parse()
+	klog.Info("starting sandbox agent")
 
 	podName := getEnv("POD_NAME", "")
 	podIP := getEnv("POD_IP", "")
@@ -20,8 +23,8 @@ func main() {
 	runtimeTypeStr := getEnv("RUNTIME_TYPE", "container")
 	runtimeSocket := getEnv("RUNTIME_SOCKET", "")
 
-	log.Printf("Agent Info: PodName=%s, PodIP=%s, NodeName=%s, Namespace=%s\n", podName, podIP, nodeName, namespace)
-	log.Printf("Runtime: Type=%s, Socket=%s\n", runtimeTypeStr, runtimeSocket)
+	klog.InfoS("Agent Info", "PodName", podName, "PodIP", podIP, "NodeName", nodeName, "Namespace", namespace)
+	klog.InfoS("Runtime", "Type", runtimeTypeStr, "Socket", runtimeSocket)
 
 	ctx := context.Background()
 	var rt runtime.Runtime
@@ -30,22 +33,24 @@ func main() {
 	rt, err = runtime.NewRuntime(ctx, runtime.RuntimeType(runtimeTypeStr), runtimeSocket)
 
 	if err != nil {
-		log.Fatalf("Failed to initialize runtime: %v", err)
+		klog.ErrorS(err, "Failed to initialize runtime")
+		os.Exit(1)
 	}
 	defer rt.Close()
 
 	rt.SetNamespace(namespace)
 
-	log.Printf("Runtime initialized successfully: %s\n", runtimeTypeStr)
+	klog.InfoS("Runtime initialized successfully", "type", runtimeTypeStr)
 
 	sandboxManager := runtime.NewSandboxManager(rt)
 	defer sandboxManager.Close()
 
 	agentServer := server.NewAgentServer(agentPort, sandboxManager)
-	log.Printf("Starting Agent HTTP Server on %s\n", agentPort)
+	klog.InfoS("Starting Agent HTTP Server", "port", agentPort)
 
 	if err := agentServer.Start(); err != nil {
-		log.Fatalf("Agent server failed: %v", err)
+		klog.ErrorS(err, "Agent server failed")
+		os.Exit(1)
 	}
 }
 

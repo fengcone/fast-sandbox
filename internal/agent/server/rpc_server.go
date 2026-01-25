@@ -3,12 +3,13 @@ package server
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"os"
 
 	"fast-sandbox/internal/agent/runtime"
 	"fast-sandbox/internal/api"
+
+	"k8s.io/klog/v2"
 )
 
 // AgentServer handles HTTP requests from controller.
@@ -33,7 +34,7 @@ func (s *AgentServer) Start() error {
 	mux.HandleFunc("/api/v1/agent/status", s.handleStatus)
 	mux.HandleFunc("/api/v1/agent/logs", s.handleLogs)
 
-	log.Printf("Starting agent HTTP server on %s\n", s.addr)
+	klog.InfoS("Starting agent HTTP server", "addr", s.addr)
 	return http.ListenAndServe(s.addr, mux)
 }
 
@@ -64,7 +65,7 @@ func (s *AgentServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.sandboxManager.GetLogs(r.Context(), sandboxID, follow, fw); err != nil {
-		log.Printf("GetLogs failed: %v", err)
+		klog.ErrorS(err, "GetLogs failed", "sandbox", sandboxID)
 		return
 	}
 }
@@ -97,7 +98,7 @@ func (s *AgentServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.sandboxManager.CreateSandbox(r.Context(), &req.Sandbox)
 	if err != nil {
-		log.Printf("Create sandbox failed: %v", err)
+		klog.ErrorS(err, "Create sandbox failed", "sandbox", req.Sandbox.SandboxID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(resp)
@@ -123,7 +124,7 @@ func (s *AgentServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.sandboxManager.DeleteSandbox(req.SandboxID)
 	if err != nil {
-		log.Printf("Delete sandbox failed: %v", err)
+		klog.ErrorS(err, "Delete sandbox failed", "sandbox", req.SandboxID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(resp)
@@ -143,7 +144,7 @@ func (s *AgentServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	images, err := s.sandboxManager.ListImages(r.Context())
 	if err != nil {
-		log.Printf("Warning: failed to list images: %v", err)
+		klog.ErrorS(err, "Warning: failed to list images")
 		images = []string{}
 	}
 	sbStatuses := s.sandboxManager.GetSandboxStatuses(r.Context())

@@ -19,7 +19,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/klog/v2"
 )
 
 type ContainerdRuntime struct {
@@ -48,12 +48,11 @@ func newContainerdRuntime(runtimeHandler string) Runtime {
 
 // Initialize init containerd client
 func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) error {
-	log := ctrl.Log.WithName("runtime")
 	r.socketPath = socketPath
 	if r.socketPath == "" {
 		r.socketPath = "/run/containerd/containerd.sock"
 	}
-	log.Info("Initializing runtime", "handler", r.runtimeHandler)
+	klog.InfoS("Initializing runtime", "handler", r.runtimeHandler)
 
 	ctx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
 	defer cancel()
@@ -85,12 +84,12 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 	r.infraMgr = infra.NewManager(infraPodPath)
 
 	if err := r.discoverCgroupPath(); err != nil {
-		log.Error(err, "Failed to discover cgroup path")
+		klog.ErrorS(err, "Failed to discover cgroup path")
 		r.cgroupPath = ""
 	}
 
 	if err := r.discoverNetNSPath(ctx); err != nil {
-		log.Error(err, "Failed to discover network namespace")
+		klog.ErrorS(err, "Failed to discover network namespace")
 	}
 
 	return nil
@@ -155,14 +154,13 @@ func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
 }
 
 func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.SandboxSpec) (*SandboxMetadata, error) {
-	log := ctrl.Log.WithName("runtime").WithValues("sandbox", config.SandboxID)
-	log.Info("Creating sandbox", "image", config.Image, "runtime", r.runtimeHandler, "netns", r.netnsPath)
+	klog.InfoS("Creating sandbox", "sandbox", config.SandboxID, "image", config.Image, "runtime", r.runtimeHandler, "netns", r.netnsPath)
 	ctx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
 	defer cancel()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	image, err := r.prepareImage(ctx, config.Image)
 	if err != nil {
-		log.Error(err, "Failed to prepare image")
+		klog.ErrorS(err, "Failed to prepare image", "sandbox", config.SandboxID)
 		return nil, err
 	}
 
@@ -170,7 +168,7 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 	specOpts := r.prepareSpecOpts(config, image)
 	labels := r.prepareLabels(config)
 
-	log.Info("Creating containerd container object")
+	klog.InfoS("Creating containerd container object", "sandbox", containerID)
 	container, err := r.client.NewContainer(
 		ctx,
 		containerID,
@@ -181,7 +179,7 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		containerd.WithContainerLabels(labels),
 	)
 	if err != nil {
-		log.Error(err, "Failed to create container object")
+		klog.ErrorS(err, "Failed to create container object", "sandbox", containerID)
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
@@ -196,18 +194,18 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	log.Info("Creating containerd task")
+	klog.InfoS("Creating containerd task", "sandbox", containerID)
 	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStreams(nil, logFile, logFile)))
 	if err != nil {
-		log.Error(err, "Failed to create containerd task", "logPath", logPath)
+		klog.ErrorS(err, "Failed to create containerd task", "sandbox", containerID, "logPath", logPath)
 		logFile.Close()
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
-	log.Info("Starting containerd task", "pid", task.Pid())
+	klog.InfoS("Starting containerd task", "sandbox", containerID, "pid", task.Pid())
 	if err = task.Start(ctx); err != nil {
-		log.Error(err, "Failed to start containerd task")
+		klog.ErrorS(err, "Failed to start containerd task", "sandbox", containerID)
 		_, _ = task.Delete(ctx, containerd.WithProcessKill)
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to start task: %w", err)
@@ -219,7 +217,7 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		CreatedAt:   time.Now().Unix(),
 		PID:         int(task.Pid()),
 	}
-	log.Info("Sandbox created successfully", "pid", task.Pid())
+	klog.InfoS("Sandbox created successfully", "sandbox", containerID, "pid", task.Pid())
 	return metadata, nil
 }
 
@@ -249,12 +247,12 @@ func (r *ContainerdRuntime) prepareSpecOpts(config *api.SandboxSpec, image conta
 			}
 
 			if !r.isPluginPathAllowed(hostPath) {
-				fmt.Printf("SECURITY: Plugin path %s is not in allowed paths, skipping\n", hostPath)
+				klog.InfoS("SECURITY: Plugin path is not in allowed paths, skipping", "path", hostPath)
 				continue
 			}
 
 			if _, err := os.Stat(hostPath); err != nil {
-				fmt.Printf("Warning: Plugin binary %s not accessible: %v\n", hostPath, err)
+				klog.InfoS("Warning: Plugin binary not accessible", "path", hostPath, "err", err)
 				continue
 			}
 
@@ -328,43 +326,66 @@ func (r *ContainerdRuntime) SetNamespace(ns string) {
 }
 
 func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string) error {
-	log := ctrl.Log.WithName("runtime").WithValues("sandbox", sandboxID)
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+	snapshotName := snapShotName(sandboxID)
+
 	container, err := r.client.LoadContainer(ctx, sandboxID)
 	if err != nil {
-		log.Error(err, "Failed to load container")
-		snapErr := r.client.SnapshotService("k8s.io").Remove(ctx, snapShotName(sandboxID))
+		klog.ErrorS(err, "Failed to load container", "sandbox", sandboxID)
+		// Container load failed, try to clean up orphaned snapshot
+		snapErr := r.client.SnapshotService("k8s.io").Remove(ctx, snapshotName)
+		if snapErr != nil {
+			klog.InfoS("Snapshot cleanup", "sandbox", sandboxID, "err", snapErr)
+		}
 		return JoinErrors(err, snapErr)
 	}
+
 	task, err := container.Task(ctx, nil)
 	if err != nil {
-		delErr := container.Delete(ctx, containerd.WithSnapshotCleanup)
-		return JoinErrors(err, delErr)
+		// Task doesn't exist, delete container and clean up snapshot
+		delErr := container.Delete(ctx)
+		snapErr := r.forceCleanupSnapshot(ctx, snapshotName)
+		return JoinErrors(err, delErr, snapErr)
 	}
 
+	// Task exists, try graceful shutdown first
 	if taskKillErr := task.Kill(ctx, syscall.SIGTERM); taskKillErr != nil {
 		exitS, taskDelErr := task.Delete(ctx, containerd.WithProcessKill)
-		containerDelErr := container.Delete(ctx, containerd.WithSnapshotCleanup)
-		log.Info("Failed to kill task, force delete", "taskKillErr", taskKillErr, "taskDelErr", taskDelErr, "containerDelErr", containerDelErr, "exitStatus", exitS)
-		return JoinErrors(taskKillErr, taskDelErr, containerDelErr)
+		containerDelErr := container.Delete(ctx)
+		snapErr := r.forceCleanupSnapshot(ctx, snapshotName)
+		klog.InfoS("Failed to kill task, force delete", "sandbox", sandboxID, "taskKillErr", taskKillErr, "taskDelErr", taskDelErr, "containerDelErr", containerDelErr, "snapErr", snapErr, "exitStatus", exitS)
+		return JoinErrors(taskKillErr, taskDelErr, containerDelErr, snapErr)
 	}
 
 	waitCh, err := task.Wait(ctx)
 	if err != nil {
-		log.Info("Failed to wait for task", "err", err)
+		klog.InfoS("Failed to wait for task", "sandbox", sandboxID, "err", err)
 	}
+
 	var taskKillErr error
 	select {
 	case <-waitCh:
 	case <-time.After(waitStopTimeout):
-		fmt.Printf("Sandbox %s did not exit after %v, sending SIGKILL\n", sandboxID, waitStopTimeout)
+		klog.InfoS("Sandbox did not exit after timeout, sending SIGKILL", "sandbox", sandboxID, "timeout", waitStopTimeout)
 		taskKillErr = task.Kill(ctx, syscall.SIGKILL)
 		<-waitCh
 	}
+
 	exitS, taskDelErr := task.Delete(ctx, containerd.WithProcessKill)
-	containerDelErr := container.Delete(ctx, containerd.WithSnapshotCleanup)
-	log.Info("kill task", "taskKillErr", taskKillErr, "taskDelErr", taskDelErr, "containerDelErr", containerDelErr, "exitStatus", exitS)
-	return JoinErrors(taskDelErr, containerDelErr)
+	containerDelErr := container.Delete(ctx)
+	snapErr := r.forceCleanupSnapshot(ctx, snapshotName)
+	klog.InfoS("Task delete completed", "sandbox", sandboxID, "taskKillErr", taskKillErr, "taskDelErr", taskDelErr, "containerDelErr", containerDelErr, "snapErr", snapErr, "exitStatus", exitS)
+	return JoinErrors(taskDelErr, containerDelErr, snapErr)
+}
+
+// forceCleanupSnapshot explicitly removes the snapshot, ignoring "not found" errors
+func (r *ContainerdRuntime) forceCleanupSnapshot(ctx context.Context, snapshotName string) error {
+	snapErr := r.client.SnapshotService("k8s.io").Remove(ctx, snapshotName)
+	// Ignore "not found" errors - snapshot may have already been cleaned up
+	if snapErr != nil && !strings.Contains(snapErr.Error(), "not found") && !strings.Contains(snapErr.Error(), "no such") {
+		return snapErr
+	}
+	return nil
 }
 
 func (r *ContainerdRuntime) GetSandboxStatus(ctx context.Context, sandboxID string) (string, error) {
