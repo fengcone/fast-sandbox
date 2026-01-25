@@ -9,18 +9,17 @@ import (
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"k8s.io/klog/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func (j *Janitor) doCleanup(ctx context.Context, task CleanupTask) error {
-	logger := log.FromContext(ctx).WithValues("container", task.ContainerID, "agent", task.PodName)
-	logger.Info("Starting cleanup of orphan sandbox")
+	klog.InfoS("Starting cleanup of orphan sandbox", "container", task.ContainerID, "agent", task.PodName)
 
 	// 0. 双重验证：通过直接 K8s API 检查 Pod 是否真的不存在
 	// 这是安全网，防止 Scanner 的 Lister 错误导致误删
 	if j.verifyPodExistsDirectly(ctx, task.AgentUID, task.Namespace) {
-		logger.Info("Pod still exists via direct API check, aborting cleanup",
+		klog.InfoS("Pod still exists via direct API check, aborting cleanup",
 			"pod-name", task.PodName, "agent-uid", task.AgentUID, "namespace", task.Namespace)
 		return nil // Pod 存在，跳过清理
 	}
@@ -38,7 +37,7 @@ func (j *Janitor) doCleanup(ctx context.Context, task CleanupTask) error {
 	// 2. 处理任务
 	t, err := c.Task(ctx, nil)
 	if err == nil {
-		logger.Info("Killing task")
+		klog.InfoS("Killing task", "container", task.ContainerID)
 		t.Kill(ctx, syscall.SIGKILL)
 
 		// 等待退出
@@ -47,7 +46,7 @@ func (j *Janitor) doCleanup(ctx context.Context, task CleanupTask) error {
 			select {
 			case <-exitCh:
 			case <-time.After(5 * time.Second):
-				logger.Info("Task exit timeout, proceeding to delete")
+				klog.InfoS("Task exit timeout, proceeding to delete", "container", task.ContainerID)
 			}
 		}
 		t.Delete(ctx)
@@ -55,13 +54,13 @@ func (j *Janitor) doCleanup(ctx context.Context, task CleanupTask) error {
 
 	// 3. 删除容器 (带 Snapshot 清理)
 	if err := c.Delete(ctx, client.WithSnapshotCleanup); err != nil {
-		logger.Error(err, "Failed to delete container metadata")
+		klog.ErrorS(err, "Failed to delete container metadata", "container", task.ContainerID)
 	}
 
 	// 4. 清理 FIFO 文件
 	j.cleanupFIFOs(task.ContainerID)
 
-	logger.Info("Cleanup completed successfully")
+	klog.InfoS("Cleanup completed successfully", "container", task.ContainerID)
 	return nil
 }
 
@@ -92,7 +91,7 @@ func (j *Janitor) verifyPodExistsDirectly(ctx context.Context, podUID, namespace
 	// 通过 UID 查找需要列出所有 Pod 然后匹配
 	podList, err := j.kubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		log.Log.Error(err, "Failed to list pods for direct verification", "namespace", namespace)
+		klog.ErrorS(err, "Failed to list pods for direct verification", "namespace", namespace)
 		return false
 	}
 
@@ -103,7 +102,7 @@ func (j *Janitor) verifyPodExistsDirectly(ctx context.Context, podUID, namespace
 				return true
 			}
 			// Pod 正在删除，允许清理其容器
-			log.Log.Info("Pod is being deleted, allowing container cleanup", "pod", p.Name, "uid", podUID)
+			klog.InfoS("Pod is being deleted, allowing container cleanup", "pod", p.Name, "uid", podUID)
 			return false
 		}
 	}

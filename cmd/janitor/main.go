@@ -16,9 +16,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 func main() {
@@ -33,13 +32,12 @@ func main() {
 	flag.StringVar(&ctrdSocket, "containerd-socket", "/run/containerd/containerd.sock", "Path to containerd socket")
 	flag.DurationVar(&orphanTimeout, "orphan-timeout", 10*time.Second, "Orphan cleanup timeout for Fast mode (containers older than this without CRD will be cleaned)")
 	flag.DurationVar(&scanInterval, "scan-interval", 2*time.Minute, "Interval for full container scan")
+
+	klog.InitFlags(nil)
 	flag.Parse()
 
-	log.SetLogger(zap.New(zap.UseDevMode(true)))
-	logger := log.Log.WithName("janitor")
-
 	if nodeName == "" {
-		logger.Error(nil, "node-name is required (or set NODE_NAME env)")
+		klog.ErrorS(nil, "node-name is required (or set NODE_NAME env)")
 		os.Exit(1)
 	}
 
@@ -51,13 +49,13 @@ func main() {
 		config, err = rest.InClusterConfig()
 	}
 	if err != nil {
-		logger.Error(err, "Failed to get kubeconfig")
+		klog.ErrorS(err, "Failed to get kubeconfig")
 		os.Exit(1)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		logger.Error(err, "Failed to create kubernetes clientset")
+		klog.ErrorS(err, "Failed to create kubernetes clientset")
 		os.Exit(1)
 	}
 
@@ -65,13 +63,13 @@ func main() {
 	apiv1alpha1.AddToScheme(scheme)
 	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
 	if err != nil {
-		logger.Error(err, "Failed to create generic k8s client")
+		klog.ErrorS(err, "Failed to create generic k8s client")
 		os.Exit(1)
 	}
 
 	ctrdClient, err := containerd.New(ctrdSocket)
 	if err != nil {
-		logger.Error(err, "Failed to connect to containerd")
+		klog.ErrorS(err, "Failed to connect to containerd")
 		os.Exit(1)
 	}
 	defer ctrdClient.Close()
@@ -83,9 +81,9 @@ func main() {
 	j.K8sClient = k8sClient
 	j.OrphanTimeout = orphanTimeout
 	j.ScanInterval = scanInterval
-	logger.Info("Starting Janitor", "node", nodeName, "orphan-timeout", orphanTimeout, "scan-interval", scanInterval)
+	klog.InfoS("Starting Janitor", "node", nodeName, "orphan-timeout", orphanTimeout, "scan-interval", scanInterval)
 	if err := j.Run(ctx); err != nil {
-		logger.Error(err, "Janitor exited with error")
+		klog.ErrorS(err, "Janitor exited with error")
 		os.Exit(1)
 	}
 }

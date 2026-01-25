@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/klog/v2"
 )
 
 func NewJanitor(kubeClient kubernetes.Interface, ctrdClient *containerd.Client, nodeName string) *Janitor {
@@ -27,8 +27,7 @@ func NewJanitor(kubeClient kubernetes.Interface, ctrdClient *containerd.Client, 
 }
 
 func (j *Janitor) Run(ctx context.Context) error {
-	logger := log.FromContext(ctx)
-	logger.Info("Starting Node Janitor", "node", j.nodeName)
+	klog.InfoS("Starting Node Janitor", "node", j.nodeName)
 
 	// 1. 初始化 Informer
 	factory := informers.NewSharedInformerFactoryWithOptions(j.kubeClient, time.Hour,
@@ -82,10 +81,9 @@ func (j *Janitor) Run(ctx context.Context) error {
 }
 
 func (j *Janitor) handlePodDeletion(ctx context.Context, pod *corev1.Pod) {
-	logger := log.FromContext(ctx)
 	// 检查是否是 Agent Pod (通过 Label)
 	if pool, ok := pod.Labels["fast-sandbox.io/pool"]; ok {
-		logger.Info("Detected agent pod deletion, checking for orphans", "pod", pod.Name, "pool", pool)
+		klog.InfoS("Detected agent pod deletion, checking for orphans", "pod", pod.Name, "pool", pool)
 		// 扫描 Containerd 找出该 UID 关联的所有沙箱
 		j.enqueueOrphansByUID(ctx, string(pod.UID), pod.Name, pod.Namespace)
 	}

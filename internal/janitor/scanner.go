@@ -9,18 +9,17 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func (j *Janitor) Scan(ctx context.Context) {
-	logger := log.FromContext(ctx)
-	logger.Info("Starting periodic containerd scan with CRD reconciliation")
+	klog.InfoS("Starting periodic containerd scan with CRD reconciliation")
 
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	containers, err := j.ctrdClient.Containers(ctx, "labels.\"fast-sandbox.io/managed\"==\"true\"")
 	if err != nil {
-		logger.Error(err, "Failed to list containers")
+		klog.ErrorS(err, "Failed to list containers")
 		return
 	}
 
@@ -84,7 +83,7 @@ func (j *Janitor) Scan(ctx context.Context) {
 		}
 
 		if shouldCleanup {
-			logger.Info("Found orphan container via CRD reconciliation",
+			klog.InfoS("Found orphan container via CRD reconciliation",
 				"container", c.ID(),
 				"name", sandboxName,
 				"reason", reason)
@@ -103,7 +102,7 @@ func (j *Janitor) podExists(uid string) bool {
 		// Lister 失败时记录错误，返回 false 允许清理
 		// 这样即使 Lister 出问题，orphan 容器也能被清理
 		// 实际清理前还会再次验证 Agent Pod 状态
-		log.Log.Error(err, "Failed to list pods for orphan detection", "agent-uid", uid)
+		klog.ErrorS(err, "Failed to list pods for orphan detection", "agent-uid", uid)
 		return false
 	}
 	for _, p := range pods {
@@ -115,7 +114,6 @@ func (j *Janitor) podExists(uid string) bool {
 }
 
 func (j *Janitor) enqueueOrphansByUID(ctx context.Context, uid string, name string, ns string) {
-	logger := log.FromContext(ctx)
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 
 	filter := fmt.Sprintf("labels.\"fast-sandbox.io/agent-uid\"==\"%s\"", uid)
@@ -125,7 +123,7 @@ func (j *Janitor) enqueueOrphansByUID(ctx context.Context, uid string, name stri
 	}
 
 	for _, c := range containers {
-		logger.Info("Enqueuing orphan container for cleanup", "container", c.ID(), "agent", name)
+		klog.InfoS("Enqueuing orphan container for cleanup", "container", c.ID(), "agent", name)
 		j.queue.Add(CleanupTask{
 			ContainerID: c.ID(),
 			AgentUID:    uid,
