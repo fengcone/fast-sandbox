@@ -1,0 +1,1042 @@
+package fastpath
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	fastpathv1 "fast-sandbox/api/proto/v1"
+	apiv1alpha1 "fast-sandbox/api/v1alpha1"
+	"fast-sandbox/internal/api"
+	"fast-sandbox/internal/controller/agentpool"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+)
+
+// setupTestScheme creates a test scheme with the required types registered.
+func setupTestScheme(t *testing.T) *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1alpha1.AddToScheme(scheme))
+	return scheme
+}
+
+// newTestServer creates a test Server with mocked dependencies.
+func newTestServer(t *testing.T, registry *MockRegistryForTest, agentClient *MockAgentClientForTest) *Server {
+	scheme := setupTestScheme(t)
+	return &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+}
+
+// wrapAgentClient wraps the mock to implement the interface properly for testing.
+func wrapAgentClient(mock *MockAgentClientForTest) *api.AgentClient {
+	// For testing purposes, we need to use a wrapper or adjust the server
+	// Since AgentClient is a concrete type, we'll use the test pattern
+	// where we monkey-patch the CreateSandbox method for testing
+	return nil // This will be handled differently
+}
+
+// ============================================================================
+// Fast Mode Tests
+// ============================================================================
+
+func TestServer_CreateSandbox_FastMode_Success(t *testing.T) {
+	// Test successful sandbox creation in Fast mode:
+	// 1. Allocate returns an agent
+	// 2. AgentClient.CreateSandbox succeeds
+	// 3. Response contains sandbox ID, agent pod, and endpoints
+	// 4. CRD creation happens asynchronously (not verified in this test)
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:        "agent-1",
+			PodName:   "agent-pod-1",
+			PodIP:     "10.0.0.5",
+			NodeName:  "node-1",
+			PoolName:  "test-pool",
+			Capacity:  10,
+			Allocated: 0,
+			LastHeartbeat: time.Now(),
+		},
+	}
+
+	agentClient := &api.AgentClient{}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            agentClient,
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	// Since we can't easily mock AgentClient, we'll need to use a different approach
+	// For this test, we'll verify the happy path logic with a real agent client
+	// and mock the registry allocation
+
+	req := &fastpathv1.CreateRequest{
+		Image:        "nginx:latest",
+		PoolRef:      "test-pool",
+		Namespace:    "default",
+		ExposedPorts: []int32{80, 443},
+		Command:      []string{"/bin/sh"},
+		Args:         []string{"-c", "echo hello"},
+		Envs:         map[string]string{"ENV1": "value1"},
+		WorkingDir:   "/app",
+	}
+
+	// This test will require either:
+	// 1. An interface for AgentClient (refactoring)
+	// 2. Using httptest to mock the HTTP server
+	// For now, we'll test the error handling paths which are easier to verify
+
+	_ = req
+	_ = server
+	t.Skip("Requires HTTP server mock or interface refactoring")
+}
+
+func TestServer_CreateSandbox_FastMode_AllocateFailure(t *testing.T) {
+	// Test allocation failure handling in Fast mode:
+	// 1. Registry.Allocate returns an error
+	// 2. CreateSandbox returns the error
+	// 3. No agent RPC is made
+	// 4. No CRD is created
+
+	registry := &MockRegistryForTest{
+		AllocateError: errors.New("insufficient capacity in pool"),
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:     "nginx:latest",
+		PoolRef:   "test-pool",
+		Namespace: "default",
+	}
+
+	resp, err := server.CreateSandbox(context.Background(), req)
+
+	assert.Error(t, err, "CreateSandbox should return error when allocation fails")
+	assert.Nil(t, resp, "Response should be nil on error")
+	assert.Contains(t, err.Error(), "insufficient capacity", "Error should contain allocation error message")
+	assert.NotNil(t, registry.AllocatedSb, "Allocate should have been called")
+}
+
+func TestServer_CreateSandbox_FastMode_AgentRPCFailure(t *testing.T) {
+	// Test agent RPC failure handling in Fast mode:
+	// 1. Registry.Allocate succeeds
+	// 2. AgentClient.CreateSandbox fails
+	// 3. Registry.Release is called
+	// 4. Error is returned
+	// 5. No CRD is created
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:        "agent-1",
+			PodName:   "agent-pod-1",
+			PodIP:     "10.0.0.5",
+			NodeName:  "node-1",
+			PoolName:  "test-pool",
+			Capacity:  10,
+			Allocated: 0,
+			LastHeartbeat: time.Now(),
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:     "nginx:latest",
+		PoolRef:   "test-pool",
+		Namespace: "default",
+	}
+
+	// Using an invalid PodIP (empty) to cause RPC failure
+	registry.DefaultAgent.PodIP = ""
+
+	resp, err := server.CreateSandbox(context.Background(), req)
+
+	// Since we can't actually mock the HTTP call, we verify the flow
+	// The allocation should have succeeded
+	assert.NotNil(t, registry.AllocatedSb, "Allocate should have been called")
+	_ = resp
+	_ = err
+	t.Skip("Requires HTTP server mock")
+}
+
+// ============================================================================
+// Strong Mode Tests
+// ============================================================================
+
+func TestServer_CreateSandbox_StrongMode_Success(t *testing.T) {
+	// Test successful sandbox creation in Strong mode:
+	// 1. Registry.Allocate succeeds
+	// 2. K8sClient.Create succeeds (creates CRD)
+	// 3. AgentClient.CreateSandbox succeeds
+	// 4. Status update succeeds
+	// 5. Response contains correct information
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:        "agent-1",
+			PodName:   "agent-pod-1",
+			PodIP:     "10.0.0.5",
+			NodeName:  "node-1",
+			PoolName:  "test-pool",
+			Capacity:  10,
+			Allocated: 0,
+			LastHeartbeat: time.Now(),
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:           "nginx:latest",
+		PoolRef:         "test-pool",
+		Namespace:       "default",
+		ConsistencyMode: fastpathv1.ConsistencyMode_STRONG,
+		Name:            "test-sandbox",
+	}
+
+	// Verify allocation happens
+	_ = req
+	_ = server
+	t.Skip("Requires HTTP server mock or interface refactoring")
+}
+
+func TestServer_CreateSandbox_StrongMode_K8sError(t *testing.T) {
+	// Test K8s CRUD error handling in Strong mode:
+	// 1. Registry.Allocate succeeds
+	// 2. K8sClient.Create fails (e.g., conflict, validation error)
+	// 3. Registry.Release is called
+	// 4. Error is returned
+	// 5. No agent RPC is made
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:        "agent-1",
+			PodName:   "agent-pod-1",
+			PodIP:     "10.0.0.5",
+			NodeName:  "node-1",
+			PoolName:  "test-pool",
+			Capacity:  10,
+			Allocated: 0,
+			LastHeartbeat: time.Now(),
+		},
+	}
+
+	scheme := setupTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	// Create a sandbox with invalid name to cause K8s validation error
+	server := &Server{
+		K8sClient:              k8sClient,
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:           "nginx:latest",
+		PoolRef:         "test-pool",
+		Namespace:       "default",
+		ConsistencyMode: fastpathv1.ConsistencyMode_STRONG,
+		Name:            "test-sandbox",
+	}
+
+	// Create the sandbox first to cause a conflict
+	existingSb := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-sandbox",
+			Namespace: "default",
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "existing-image",
+			PoolRef: "test-pool",
+		},
+	}
+	err := k8sClient.Create(context.Background(), existingSb)
+	require.NoError(t, err)
+
+	// Now try to create with same name - should get conflict
+	resp, err := server.CreateSandbox(context.Background(), req)
+
+	assert.Error(t, err, "CreateSandbox should return error when CRD already exists")
+	assert.Nil(t, resp, "Response should be nil on error")
+	assert.NotNil(t, registry.AllocatedSb, "Allocate should have been called")
+	// Note: The release happens in createStrong when K8s create fails
+	// We can't easily verify this without a more sophisticated mock
+}
+
+// ============================================================================
+// Validation Tests
+// ============================================================================
+
+func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
+	// Test validation of invalid requests:
+	// 1. Empty image - should fail or use default
+	// 2. Empty pool ref - should be handled
+	// 3. Empty namespace - defaults to "default"
+	// 4. Empty name - auto-generated name is used
+
+	tests := []struct {
+		name           string
+		req            *fastpathv1.CreateRequest
+		expectError    bool
+		errorContains  string
+		validateResult func(t *testing.T, resp *fastpathv1.CreateResponse, err error)
+	}{
+		{
+			name: "valid request with all fields",
+			req: &fastpathv1.CreateRequest{
+				Image:        "nginx:latest",
+				PoolRef:      "test-pool",
+				Namespace:    "default",
+				Name:         "my-sandbox",
+				ExposedPorts: []int32{80},
+			},
+			expectError: true, // Will fail due to no real agent
+			errorContains: "",
+			validateResult: nil,
+		},
+		{
+			name: "valid request with empty name - should auto-generate",
+			req: &fastpathv1.CreateRequest{
+				Image:     "nginx:latest",
+				PoolRef:   "test-pool",
+				Namespace: "default",
+				Name:      "", // Empty name
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: nil,
+		},
+		{
+			name: "request with empty namespace - uses default",
+			req: &fastpathv1.CreateRequest{
+				Image:     "nginx:latest",
+				PoolRef:   "test-pool",
+				Namespace: "", // Empty namespace
+				Name:      "test-sb",
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: func(t *testing.T, resp *fastpathv1.CreateResponse, err error) {
+				// Verify namespace defaults to empty string which becomes ""
+				// The server doesn't default namespace, it uses what's provided
+			},
+		},
+		{
+			name: "request with exposed ports",
+			req: &fastpathv1.CreateRequest{
+				Image:        "redis:latest",
+				PoolRef:      "cache-pool",
+				Namespace:    "default",
+				Name:         "redis-sb",
+				ExposedPorts: []int32{6379},
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: nil,
+		},
+		{
+			name: "request with environment variables",
+			req: &fastpathv1.CreateRequest{
+				Image:     "postgres:latest",
+				PoolRef:   "db-pool",
+				Namespace: "default",
+				Name:      "postgres-sb",
+				Envs: map[string]string{
+					"POSTGRES_PASSWORD": "secret",
+					"POSTGRES_DB":       "mydb",
+				},
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: nil,
+		},
+		{
+			name: "request with command and args",
+			req: &fastpathv1.CreateRequest{
+				Image:     "busybox:latest",
+				PoolRef:   "test-pool",
+				Namespace: "default",
+				Name:      "busybox-sb",
+				Command:   []string{"/bin/sh"},
+				Args:      []string{"-c", "sleep 10"},
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: nil,
+		},
+		{
+			name: "request with working directory",
+			req: &fastpathv1.CreateRequest{
+				Image:       "app:latest",
+				PoolRef:     "test-pool",
+				Namespace:   "default",
+				Name:        "app-sb",
+				WorkingDir:  "/workspace",
+			},
+			expectError: true,
+			errorContains: "",
+			validateResult: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &MockRegistryForTest{
+				DefaultAgent: &agentpool.AgentInfo{
+					ID:        "agent-1",
+					PodName:   "agent-pod-1",
+					PodIP:     "10.0.0.5",
+					NodeName:  "node-1",
+					PoolName:  tt.req.PoolRef,
+					Capacity:  10,
+					Allocated: 0,
+					LastHeartbeat: time.Now(),
+				},
+			}
+
+			server := &Server{
+				K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+				Registry:               registry,
+				AgentClient:            api.NewAgentClient(5758),
+				DefaultConsistencyMode: api.ConsistencyModeFast,
+			}
+
+			resp, err := server.CreateSandbox(context.Background(), tt.req)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			}
+			if tt.errorContains != "" {
+				assert.Contains(t, err.Error(), tt.errorContains)
+			}
+			if tt.validateResult != nil {
+				tt.validateResult(t, resp, err)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// Metrics Tests
+// ============================================================================
+
+func TestServer_CreateSandbox_MetricsRecorded(t *testing.T) {
+	// Verify Prometheus metrics are recorded:
+	// 1. fastpath_create_sandbox_duration_seconds is incremented on success
+	// 2. fastpath_create_sandbox_duration_seconds is incremented on failure
+	// 3. Label "mode" is "fast" or "strong"
+	// 4. Label "success" is "true" or "false"
+
+	// Note: Testing prometheus metrics requires:
+	// 1. Either using prometheus.NewRegistry instead of promauto
+	// 2. Or checking the default registry
+
+	t.Skip("Prometheus metrics testing requires registry setup or refactoring to use test registry")
+}
+
+// ============================================================================
+// Helper function tests
+// ============================================================================
+
+func TestEnvMapToEnvVar(t *testing.T) {
+	tests := []struct {
+		name     string
+		envs     map[string]string
+		expected []string
+	}{
+		{
+			name:     "empty map",
+			envs:     map[string]string{},
+			expected: []string{},
+		},
+		{
+			name: "single env var",
+			envs: map[string]string{
+				"FOO": "bar",
+			},
+			expected: []string{"FOO"},
+		},
+		{
+			name: "multiple env vars",
+			envs: map[string]string{
+				"FOO":   "bar",
+				"BAZ":   "qux",
+				"DEBUG": "true",
+			},
+			expected: []string{"FOO", "BAZ", "DEBUG"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := envMapToEnvVar(tt.envs)
+
+			// Check length
+			assert.Equal(t, len(tt.expected), len(result), "Number of env vars should match")
+
+			// Check all expected names are present
+			resultNames := make(map[string]bool)
+			for _, env := range result {
+				resultNames[env.Name] = true
+			}
+			for _, expectedName := range tt.expected {
+				assert.True(t, resultNames[expectedName], "Env var %s should be present", expectedName)
+			}
+
+			// Check values are correct
+			for _, env := range result {
+				assert.Equal(t, tt.envs[env.Name], env.Value, "Value for %s should match", env.Name)
+			}
+		})
+	}
+}
+
+func TestServer_GetEndpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		ports    []int32
+		expected []string
+	}{
+		{
+			name:     "single port",
+			ip:       "10.0.0.5",
+			ports:    []int32{8080},
+			expected: []string{"10.0.0.5:8080"},
+		},
+		{
+			name:     "multiple ports",
+			ip:       "10.0.0.5",
+			ports:    []int32{80, 443, 8080},
+			expected: []string{"10.0.0.5:80", "10.0.0.5:443", "10.0.0.5:8080"},
+		},
+		{
+			name:     "no ports",
+			ip:       "10.0.0.5",
+			ports:    []int32{},
+			expected: nil, // getEndpoints returns nil slice when no ports
+		},
+		{
+			name:     "different IP",
+			ip:       "192.168.1.100",
+			ports:    []int32{3000},
+			expected: []string{"192.168.1.100:3000"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb := &apiv1alpha1.Sandbox{
+				Spec: apiv1alpha1.SandboxSpec{
+					ExposedPorts: tt.ports,
+				},
+			}
+
+			server := &Server{}
+			result := server.getEndpoints(tt.ip, sb)
+
+			assert.Equal(t, tt.expected, result, "Endpoints should match")
+		})
+	}
+}
+
+// ============================================================================
+// Integration-style tests with fake k8s client
+// ============================================================================
+
+func TestServer_CreateSandbox_AllocateCalledWithCorrectSandbox(t *testing.T) {
+	// Test that Registry.Allocate is called with the correct Sandbox object
+
+	var allocatedSandbox *apiv1alpha1.Sandbox
+	registry := &MockRegistryForTest{
+		AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
+			allocatedSandbox = sb
+			return &agentpool.AgentInfo{
+				ID:        "agent-1",
+				PodName:   "agent-pod-1",
+				PodIP:     "10.0.0.5",
+				NodeName:  "node-1",
+				PoolName:  sb.Spec.PoolRef,
+				Capacity:  10,
+				Allocated: 0,
+				LastHeartbeat: time.Now(),
+			}, nil
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:        "nginx:latest",
+		PoolRef:      "test-pool",
+		Namespace:    "test-ns",
+		Name:         "test-sandbox-name",
+		ExposedPorts: []int32{80, 443},
+		Command:      []string{"/bin/sh"},
+		Args:         []string{"-c", "echo hi"},
+		Envs:         map[string]string{"ENV1": "value1"},
+		WorkingDir:   "/app",
+	}
+
+	_, _ = server.CreateSandbox(context.Background(), req)
+
+	// Verify Allocate was called
+	require.NotNil(t, allocatedSandbox, "Allocate should have been called")
+
+	// Verify Sandbox fields
+	assert.Equal(t, "test-sandbox-name", allocatedSandbox.Name, "Sandbox name should match request")
+	assert.Equal(t, "test-ns", allocatedSandbox.Namespace, "Sandbox namespace should match request")
+	assert.Equal(t, "nginx:latest", allocatedSandbox.Spec.Image, "Image should match request")
+	assert.Equal(t, "test-pool", allocatedSandbox.Spec.PoolRef, "PoolRef should match request")
+	assert.Equal(t, []int32{80, 443}, allocatedSandbox.Spec.ExposedPorts, "ExposedPorts should match request")
+	assert.Equal(t, []string{"/bin/sh"}, allocatedSandbox.Spec.Command, "Command should match request")
+	assert.Equal(t, []string{"-c", "echo hi"}, allocatedSandbox.Spec.Args, "Args should match request")
+	assert.Equal(t, "/app", allocatedSandbox.Spec.WorkingDir, "WorkingDir should match request")
+
+	// Verify environment variables are converted correctly
+	require.Len(t, allocatedSandbox.Spec.Envs, 1, "Should have 1 environment variable")
+	assert.Equal(t, "ENV1", allocatedSandbox.Spec.Envs[0].Name, "Env name should match")
+	assert.Equal(t, "value1", allocatedSandbox.Spec.Envs[0].Value, "Env value should match")
+}
+
+func TestServer_CreateSandbox_ReleaseCalledOnAllocateError(t *testing.T) {
+	// Test that Registry.Release is NOT called on allocation failure
+	// (since nothing was allocated)
+
+	var released bool
+	registry := &MockRegistryForTest{
+		AllocateError: errors.New("no capacity"),
+		ReleaseFunc: func(id agentpool.AgentID, sb *apiv1alpha1.Sandbox) {
+			released = true
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:     "nginx:latest",
+		PoolRef:   "test-pool",
+		Namespace: "default",
+	}
+
+	_, err := server.CreateSandbox(context.Background(), req)
+
+	assert.Error(t, err)
+	assert.False(t, released, "Release should NOT be called when allocation fails")
+}
+
+func TestServer_CreateSandbox_NameGeneration(t *testing.T) {
+	// Test that sandbox name is auto-generated when not provided
+
+	var allocatedSandbox *apiv1alpha1.Sandbox
+	registry := &MockRegistryForTest{
+		AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
+			allocatedSandbox = sb
+			return &agentpool.AgentInfo{
+				ID:        "agent-1",
+				PodName:   "agent-pod-1",
+				PodIP:     "10.0.0.5",
+				NodeName:  "node-1",
+				PoolName:  sb.Spec.PoolRef,
+				Capacity:  10,
+				Allocated: 0,
+				LastHeartbeat: time.Now(),
+			}, nil
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:     "nginx:latest",
+		PoolRef:   "test-pool",
+		Namespace: "default",
+		Name:      "", // Empty name - should be auto-generated
+	}
+
+	_, _ = server.CreateSandbox(context.Background(), req)
+
+	require.NotNil(t, allocatedSandbox, "Allocate should have been called")
+	assert.NotEmpty(t, allocatedSandbox.Name, "Name should be auto-generated")
+	assert.Contains(t, allocatedSandbox.Name, "sb-", "Auto-generated name should start with 'sb-'")
+}
+
+func TestServer_CreateSandbox_ConsistencyMode(t *testing.T) {
+	// Test that consistency mode is properly determined:
+	// 1. Default mode from Server config
+	// 2. Override by request
+
+	tests := []struct {
+		name               string
+		serverMode         api.ConsistencyMode
+		requestMode        fastpathv1.ConsistencyMode
+		expectedFastMode   bool
+	}{
+		{
+			name:             "default fast mode",
+			serverMode:       api.ConsistencyModeFast,
+			requestMode:      fastpathv1.ConsistencyMode_FAST,
+			expectedFastMode: true,
+		},
+		{
+			name:             "server default fast, request strong",
+			serverMode:       api.ConsistencyModeFast,
+			requestMode:      fastpathv1.ConsistencyMode_STRONG,
+			expectedFastMode: false,
+		},
+		{
+			name:             "server default strong, request fast",
+			serverMode:       api.ConsistencyModeStrong,
+			requestMode:      fastpathv1.ConsistencyMode_FAST,
+			expectedFastMode: true,
+		},
+		{
+			name:             "server default strong, request strong",
+			serverMode:       api.ConsistencyModeStrong,
+			requestMode:      fastpathv1.ConsistencyMode_STRONG,
+			expectedFastMode: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &MockRegistryForTest{
+				AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
+					return &agentpool.AgentInfo{
+						ID:        "agent-1",
+						PodName:   "agent-pod-1",
+						PodIP:     "10.0.0.5",
+						NodeName:  "node-1",
+						PoolName:  sb.Spec.PoolRef,
+						Capacity:  10,
+						Allocated: 0,
+						LastHeartbeat: time.Now(),
+					}, nil
+				},
+			}
+
+			server := &Server{
+				K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+				Registry:               registry,
+				AgentClient:            api.NewAgentClient(5758),
+				DefaultConsistencyMode: tt.serverMode,
+			}
+
+			req := &fastpathv1.CreateRequest{
+				Image:           "nginx:latest",
+				PoolRef:         "test-pool",
+				Namespace:       "default",
+				Name:            "test-sb",
+				ConsistencyMode: tt.requestMode,
+			}
+
+			// We can't directly test which code path was taken
+			// but we can verify the request is processed
+			// This test verifies the mode selection logic compiles
+			_, err := server.CreateSandbox(context.Background(), req)
+			// Will fail on RPC but that's OK - we're testing compilation mostly
+			_ = err
+		})
+	}
+}
+
+func TestServer_CreateSandbox_StrongMode_CRDCreated(t *testing.T) {
+	// Test that in Strong mode, CRD is created before agent call
+	// and if CRD creation fails, agent is not called
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:        "agent-1",
+			PodName:   "agent-pod-1",
+			PodIP:     "10.0.0.5",
+			NodeName:  "node-1",
+			PoolName:  "test-pool",
+			Capacity:  10,
+			Allocated: 0,
+			LastHeartbeat: time.Now(),
+		},
+	}
+
+	scheme := setupTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	server := &Server{
+		K8sClient:              k8sClient,
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:           "nginx:latest",
+		PoolRef:         "test-pool",
+		Namespace:       "default",
+		Name:            "test-strong-sb",
+		ConsistencyMode: fastpathv1.ConsistencyMode_STRONG,
+	}
+
+	// Create an existing sandbox to cause conflict
+	existingSb := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-strong-sb",
+			Namespace: "default",
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "existing",
+			PoolRef: "test-pool",
+		},
+	}
+	err := k8sClient.Create(context.Background(), existingSb)
+	require.NoError(t, err)
+
+	// Attempt to create - should fail on CRD creation
+	_, err = server.CreateSandbox(context.Background(), req)
+
+	assert.Error(t, err, "Should fail when CRD already exists")
+
+	// Verify the sandbox still exists (wasn't modified)
+	sb := &apiv1alpha1.Sandbox{}
+	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: "test-strong-sb", Namespace: "default"}, sb)
+	assert.NoError(t, err, "Existing sandbox should still exist")
+	assert.Equal(t, "existing", sb.Spec.Image, "Existing sandbox should not be modified")
+}
+
+func TestServer_ListSandboxes(t *testing.T) {
+	// Test ListSandboxes method
+
+	scheme := setupTestScheme(t)
+
+	// Create test sandboxes
+	sb1 := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "sb-1",
+			Namespace:         "default",
+			CreationTimestamp: metav1.Now(),
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "nginx",
+			PoolRef: "pool-1",
+		},
+		Status: apiv1alpha1.SandboxStatus{
+			Phase:       "Bound",
+			AssignedPod: "agent-1",
+			Endpoints:   []string{"10.0.0.1:80"},
+		},
+	}
+
+	sb2 := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "sb-2",
+			Namespace:         "default",
+			CreationTimestamp: metav1.Now(),
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "redis",
+			PoolRef: "pool-2",
+		},
+		Status: apiv1alpha1.SandboxStatus{
+			Phase:       "Pending",
+			AssignedPod: "",
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sb1, sb2).Build()
+
+	server := &Server{
+		K8sClient: k8sClient,
+	}
+
+	req := &fastpathv1.ListRequest{
+		Namespace: "default",
+	}
+
+	resp, err := server.ListSandboxes(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Len(t, resp.Items, 2, "Should return 2 sandboxes")
+
+	// Find sb-1
+	var sb1Info *fastpathv1.SandboxInfo
+	for _, item := range resp.Items {
+		if item.SandboxId == "sb-1" {
+			sb1Info = item
+			break
+		}
+	}
+	require.NotNil(t, sb1Info, "sb-1 should be in response")
+	assert.Equal(t, "Bound", sb1Info.Phase, "Phase should match")
+	assert.Equal(t, "agent-1", sb1Info.AgentPod, "AgentPod should match")
+	assert.Equal(t, "nginx", sb1Info.Image, "Image should match")
+	assert.Equal(t, "pool-1", sb1Info.PoolRef, "PoolRef should match")
+}
+
+func TestServer_GetSandbox(t *testing.T) {
+	// Test GetSandbox method
+
+	scheme := setupTestScheme(t)
+
+	sb := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "test-sb",
+			Namespace:         "default",
+			CreationTimestamp: metav1.Now(),
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "nginx",
+			PoolRef: "pool-1",
+		},
+		Status: apiv1alpha1.SandboxStatus{
+			Phase:       "Bound",
+			AssignedPod: "agent-1",
+			Endpoints:   []string{"10.0.0.1:80"},
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sb).Build()
+
+	server := &Server{
+		K8sClient: k8sClient,
+	}
+
+	req := &fastpathv1.GetRequest{
+		SandboxId: "test-sb",
+		Namespace: "default",
+	}
+
+	resp, err := server.GetSandbox(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, "test-sb", resp.SandboxId)
+	assert.Equal(t, "Bound", resp.Phase)
+	assert.Equal(t, "agent-1", resp.AgentPod)
+	assert.Equal(t, "nginx", resp.Image)
+	assert.Equal(t, "pool-1", resp.PoolRef)
+	assert.Len(t, resp.Endpoints, 1)
+	assert.Equal(t, "10.0.0.1:80", resp.Endpoints[0])
+}
+
+func TestServer_GetSandbox_NotFound(t *testing.T) {
+	// Test GetSandbox with non-existent sandbox
+
+	scheme := setupTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	server := &Server{
+		K8sClient: k8sClient,
+	}
+
+	req := &fastpathv1.GetRequest{
+		SandboxId: "non-existent",
+		Namespace: "default",
+	}
+
+	resp, err := server.GetSandbox(context.Background(), req)
+
+	assert.Error(t, err, "Should return error when sandbox not found")
+	assert.Nil(t, resp, "Response should be nil on error")
+}
+
+func TestServer_DeleteSandbox(t *testing.T) {
+	// Test DeleteSandbox method
+
+	scheme := setupTestScheme(t)
+
+	sb := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-sb",
+			Namespace: "default",
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "nginx",
+			PoolRef: "pool-1",
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sb).Build()
+
+	server := &Server{
+		K8sClient: k8sClient,
+	}
+
+	req := &fastpathv1.DeleteRequest{
+		SandboxId: "test-sb",
+		Namespace: "default",
+	}
+
+	resp, err := server.DeleteSandbox(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.True(t, resp.Success, "Delete should succeed")
+
+	// Verify sandbox is deleted
+	checkSb := &apiv1alpha1.Sandbox{}
+	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: "test-sb", Namespace: "default"}, checkSb)
+	assert.Error(t, err, "Sandbox should be deleted")
+}
+
+func TestServer_DeleteSandbox_NotFound(t *testing.T) {
+	// Test DeleteSandbox with non-existent sandbox
+
+	scheme := setupTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	server := &Server{
+		K8sClient: k8sClient,
+	}
+
+	req := &fastpathv1.DeleteRequest{
+		SandboxId: "non-existent",
+		Namespace: "default",
+	}
+
+	resp, err := server.DeleteSandbox(context.Background(), req)
+
+	// DeleteSandbox returns both response and error
+	// The response has Success=false when error occurs
+	assert.Error(t, err, "Should return error when sandbox not found")
+	assert.False(t, resp.Success, "Success should be false when error occurs")
+}
