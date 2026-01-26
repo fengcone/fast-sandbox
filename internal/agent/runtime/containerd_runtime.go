@@ -154,20 +154,28 @@ func (r *ContainerdRuntime) discoverNetNSPath(ctx context.Context) error {
 }
 
 func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.SandboxSpec) (*SandboxMetadata, error) {
+	totalStart := time.Now()
+
 	klog.InfoS("Creating sandbox", "sandbox", config.SandboxID, "image", config.Image, "runtime", r.runtimeHandler, "netns", r.netnsPath)
 	ctx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
 	defer cancel()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+
+	// 1. Image preparation
+	pullStart := time.Now()
 	image, err := r.prepareImage(ctx, config.Image)
 	if err != nil {
 		klog.ErrorS(err, "Failed to prepare image", "sandbox", config.SandboxID)
 		return nil, err
 	}
+	pullDuration := time.Since(pullStart)
 
 	containerID := config.SandboxID
 	specOpts := r.prepareSpecOpts(config, image)
 	labels := r.prepareLabels(config)
 
+	// 2. Create container
+	createStart := time.Now()
 	klog.InfoS("Creating containerd container object", "sandbox", containerID)
 	container, err := r.client.NewContainer(
 		ctx,
@@ -182,6 +190,7 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		klog.ErrorS(err, "Failed to create container object", "sandbox", containerID)
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
+	createDuration := time.Since(createStart)
 
 	logDir := "/var/log/fast-sandbox"
 	if err := os.MkdirAll(logDir, 0755); err != nil {
@@ -194,6 +203,8 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
+	// 3. Start container
+	startStart := time.Now()
 	klog.InfoS("Creating containerd task", "sandbox", containerID)
 	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStreams(nil, logFile, logFile)))
 	if err != nil {
@@ -210,6 +221,17 @@ func (r *ContainerdRuntime) CreateSandbox(ctx context.Context, config *api.Sandb
 		_ = container.Delete(ctx, containerd.WithSnapshotCleanup)
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
+	startDuration := time.Since(startStart)
+
+	totalDuration := time.Since(totalStart)
+
+	klog.InfoS("Runtime CreateSandbox timing",
+		"sandboxID", config.SandboxID,
+		"total_ms", totalDuration.Milliseconds(),
+		"pull_ms", pullDuration.Milliseconds(),
+		"create_ms", createDuration.Milliseconds(),
+		"start_ms", startDuration.Milliseconds())
+
 	metadata := &SandboxMetadata{
 		SandboxSpec: *config,
 		ContainerID: containerID,
