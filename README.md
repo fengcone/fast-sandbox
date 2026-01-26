@@ -1,70 +1,197 @@
 # Fast Sandbox
 
-Fast Sandbox 是一个高性能、云原生（Kubernetes-native）的沙箱管理系统，旨在为 AI Agent、Serverless 函数和计算密集型任务提供**毫秒级的容器冷启动**与**受控自愈**能力。
+Fast Sandbox is a high-performance, cloud-native (Kubernetes-native) sandbox management system designed to provide **millisecond-scale cold container startup** and **controlled self-healing** capabilities for AI Agents, Serverless functions, and compute-intensive tasks.
 
-通过预热 "Agent Pod" 资源池并直接集成宿主机层面的容器管理能力，Fast Sandbox 绕过了传统 Kubernetes Pod 创建的巨大开销，实现了极速的任务分发与物理隔离。
+By pre-warming "Agent Pod" resource pools and directly integrating with host-level container management, Fast Sandbox bypasses the significant overhead of traditional Kubernetes Pod creation, achieving ultra-fast task distribution with physical isolation.
 
-## 🚀 核心特性
+## Features
 
-*   **⚡️ 极速启动 (Fast-Path API)**: 引入 gRPC Fast-Path 机制，支持 **<50ms** 的端到端启动延迟。支持 **Fast Mode** (Agent-First, 极速) 和 **Strong Mode** (CRD-First, 强一致) 双模切换。
-*   **🛠️ 开发者 CLI (`fsb-ctl`)**: 提供类似 Docker 的命令行体验。支持交互式创建、配置管理、日志流式查看 (`logs -f`) 和状态查询。
-*   **💾 零拉取启动**: 利用 **Host Containerd 集成** 技术，直接在宿主机上启动微容器，复用节点镜像缓存。
-*   **⚖️ 智能调度**: 基于 **镜像亲和性 (Image Affinity)** 和 **原子插槽 (Slot)** 的调度算法，彻底消除镜像拉取延迟并避免端口冲突。
-*   **🛡️ 健壮性设计**:
-    *   **受控自愈**: 支持 `AutoRecreate` 策略和手动 `resetRevision`。
-    *   **优雅关闭**: 完整的 SIGTERM -> SIGKILL 流程，防止僵尸进程。
-    *   **Node Janitor**: 独立 DaemonSet 自动回收孤儿容器与残留文件。
+- **Fast-Path API**: gRPC-based fast path supporting **<50ms** end-to-end startup latency. Dual-mode switching between **Fast Mode** (Agent-First, ultra-fast) and **Strong Mode** (CRD-First, strong consistency).
+- **Developer CLI (`fsb-ctl`)**: Docker-like command-line experience with interactive creation, configuration management, streaming log viewing (`logs -f`), and status queries.
+- **Zero-Pull Startup**: Leverages **Host Containerd Integration** to launch microcontainers directly on the host, reusing node image cache.
+- **Smart Scheduling**: Allocation algorithm based on **Image Affinity** and **Atomic Slots**, eliminating image pull latency and avoiding port conflicts.
+- **Resilient Design**:
+  - **Controlled Self-Healing**: Supports `AutoRecreate` policy and manual `resetRevision`.
+  - **Graceful Shutdown**: Complete SIGTERM → SIGKILL flow preventing zombie processes.
+  - **Node Janitor**: Independent DaemonSet for automatic orphan container and file cleanup.
 
-## 🏗 系统架构
+## Architecture
 
-系统采用“控制面集中决策，数据面极速执行”的架构：
+The system uses a "centralized control plane decision, extreme data plane execution" architecture:
 
-1.  **控制面 (Control Plane)**:
-    *   **Fast-Path Server (gRPC)**: 处理高并发的沙箱创建/删除请求，直接对接 CLI。
-    *   **SandboxController**: 负责 CRD 状态机维护、Finalizer 资源回收及双模一致性协调。
-    *   **Atomic Registry**: 内存级的状态中心，支持高并发下的互斥分配与镜像权重计算。
+### Control Plane
+- **Fast-Path Server (gRPC)**: Handles high-concurrency sandbox create/delete requests, direct CLI access
+  - Port: `9090`
+  - Services: `CreateSandbox`, `DeleteSandbox`, `UpdateSandbox`, `ListSandboxes`, `GetSandbox`
+- **SandboxController**: Manages CRD state machine, Finalizer resource cleanup, and dual-mode consistency coordination
+- **SandboxPoolController**: Manages Agent Pod resource pools (Min/Max capacity)
+- **Atomic Registry**: In-memory state center supporting high-concurrency mutex allocation and image weight scoring
 
-2.  **数据面 (Data Plane - Agent)**:
-    *   运行在宿主机上的特权 Pod，通过 gRPC/HTTP 与控制面通信。
-    *   **Runtime Integration**: 直接调用宿主机 Containerd Socket，实现容器生命周期管理和**日志持久化**。
+### Data Plane (Agent)
+- Privileged Pods running on hosts, communicating via HTTP with the control plane
+- **Runtime Integration**: Direct Containerd Socket access for container lifecycle and **log persistence**
+- **HTTP Server**: Listens on port `5758`
+  - `POST /api/v1/agent/create` - Create sandbox
+  - `POST /api/v1/agent/delete` - Delete sandbox
+  - `GET /api/v1/agent/status` - Get agent status
+  - `GET /api/v1/agent/logs?follow=true` - Stream logs
 
-3.  **工具链 (Tooling)**:
-    *   **fsb-ctl**: 开发者 CLI，支持 `run`, `list`, `get`, `logs`, `delete` 等命令。
+### Tooling
+- **fsb-ctl**: Developer CLI with `run`, `list`, `get`, `logs`, `delete` commands
 
-## 🛠 快速开始
+## Quick Start
 
-### 1. 安装 CLI
+### 1. Install CLI
+
 ```bash
 make build
-# 生成 bin/fsb-ctl
+# Generates bin/fsb-ctl
 export PATH=$PWD/bin:$PATH
 ```
 
-### 2. 启动沙箱 (交互模式)
+### 2. Create a Sandbox (Interactive)
+
 ```bash
 fsb-ctl run my-sandbox
-# 将自动打开编辑器供您配置镜像、端口和命令
+# Opens editor for configuration (image, ports, command, env)
 ```
 
-### 3. 查看实时日志
+### 3. View Real-time Logs
+
 ```bash
 fsb-ctl logs my-sandbox -f
 ```
 
-### 4. 声明式定义 (YAML)
-您也可以直接操作 Kubernetes CRD：
+### 4. Declarative YAML
+
+You can also use Kubernetes CRD directly:
 
 ```yaml
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
+metadata:
+  name: my-sandbox
+  namespace: default
 spec:
   image: alpine:latest
   exposedPorts: [8080]
   poolRef: default-pool
-  consistencyMode: fast  # 或 strong
+  consistencyMode: fast  # or strong
   failurePolicy: AutoRecreate
 ```
 
-## 📄 许可证
+## Consistency Modes
+
+### Fast Mode (Default)
+1. CLI → Controller gRPC request
+2. Registry allocates Agent
+3. Controller → Agent HTTP create request
+4. Agent starts container via Containerd
+5. Controller returns success to CLI
+6. Controller *async* creates K8s CRD
+
+**Latency**: <50ms
+**Trade-off**: CRD creation failure may cause orphan (cleaned by Janitor)
+
+### Strong Mode
+1. CLI → Controller gRPC request
+2. Controller creates K8s CRD (Pending phase)
+3. Controller Watch triggers
+4. Controller → Agent HTTP create request
+5. Agent starts container
+6. CRD status updated to Running
+
+**Latency**: ~200ms
+**Guarantee**: Strong consistency, no orphans
+
+## Configuration
+
+### Controller Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent-port` | `5758` | Agent HTTP server port |
+| `--metrics-bind-address` | `:9091` | Prometheus metrics endpoint |
+| `--health-probe-bind-address` | `:5758` | Health check endpoint |
+| `--fastpath-consistency-mode` | `fast` | Consistency mode: fast or strong |
+| `--fastpath-orphan-timeout` | `10s` | Fast mode orphan cleanup timeout |
+
+### Agent Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--containerd-socket` | `/run/containerd/containerd.sock` | Containerd socket path |
+| `--http-port` | `5758` | HTTP server port |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_CAPACITY` | Max sandboxes per agent (default: 5) |
+
+## gRPC API
+
+```protobuf
+service FastPathService {
+  rpc CreateSandbox(CreateRequest) returns (CreateResponse);
+  rpc DeleteSandbox(DeleteRequest) returns (DeleteResponse);
+  rpc UpdateSandbox(UpdateRequest) returns (UpdateResponse);
+  rpc ListSandboxes(ListRequest) returns (ListResponse);
+  rpc GetSandbox(GetRequest) returns (SandboxInfo);
+}
+```
+
+### ConsistencyMode
+- `FAST`: Create container first, async CRD write
+- `STRONG`: Write CRD first, then create container
+
+### FailurePolicy
+- `MANUAL`: Report status only, no auto-recovery
+- `AUTO_RECREATE`: Automatically reschedule on failure
+
+## Development
+
+### Running Tests
+
+```bash
+# All tests
+go test ./... -v
+
+# With coverage
+go test ./... -coverprofile=coverage.out
+
+# Specific module
+go test ./internal/controller/agentpool/ -v
+```
+
+See [docs/TESTING.md](docs/TESTING.md) for detailed testing documentation.
+
+### Performance Profiling
+
+```bash
+# CPU profiling
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30 > cpu.prof
+
+# View profile
+go tool pprof -http=:8080 cpu.prof
+```
+
+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for performance analysis.
+
+## Roadmap
+
+- [x] Phase 1: Core Runtime (Containerd) & gRPC framework
+- [x] Phase 2: Fast-Path API & Registry scheduling
+- [x] Phase 3: CLI (`fsb-ctl`) & interactive experience
+- [x] Phase 4: Log streaming & auto tunneling
+- [x] Phase 5: Unified logging (klog)
+- [x] Phase 6: Performance instrumentation & unit tests
+- [ ] Phase 7: Container checkpoint/restore (CRIU)
+- [ ] Phase 8: Web console & traffic proxy
+- [ ] Phase 9: gVisor support for secure sandboxing
+- [ ] Phase 10: CLI exec bash & Python SDK (Modal-like)
+- [ ] Phase 11: GPU container support
+
+## License
 
 [MIT](LICENSE)

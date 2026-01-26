@@ -262,4 +262,5 @@ nbdist/
 generated/
 **/generated/**
 
-/docs
+# Archive directory for old documentation (local only)
+docs/archive/
