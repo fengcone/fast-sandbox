@@ -33,18 +33,24 @@ Target: <50ms end-to-end for FastPath mode
 
 ### Registry Allocation (Baseline)
 
-| Benchmark | ns/op | B/op | allocs/op |
-|-----------|-------|------|-----------|
-| Allocate (100 agents) | 1319 | 993 | 4 |
-| AllocateWithPorts | 1329 | 993 | 4 |
-| AllocateNoImageMatch | 1253 | 993 | 4 |
-| AllocateLargePool (1000) | 14148 | 8298 | 4 |
-| RegisterOrUpdate | 125.4 | 91 | 4 |
-| GetAllAgents (100) | 4864 | 19328 | 2 |
-| GetAllAgentsLargePool (1000) | 55731 | 188419 | 2 |
-| GetAgentByID | 16.66 | 0 | 0 |
-| Release | 14.84 | 0 | 0 |
-| CleanupStaleAgents | 38.63 | 0 | 0 |
+**Test Environment:**
+- CPU: Apple M4 Pro
+- OS: darwin/arm64
+- Date: 2026-01-26
+
+| Benchmark | ns/op | B/op | allocs/op | Notes |
+|-----------|-------|------|-----------|-------|
+| BenchmarkRegistryAllocate | 1312 | 993 | 4 | Standard allocation (100 agents) |
+| BenchmarkRegistryAllocateWithPorts | 1469 | 993 | 4 | With port constraints |
+| BenchmarkRegistryAllocateNoImageMatch | 1349 | 993 | 4 | No pre-image match |
+| BenchmarkRegistryAllocateLargePool | 14613 | 8297 | 4 | Large pool (1000 agents) |
+| BenchmarkRegistryRegisterOrUpdate | 127.9 | 91 | 4 | Agent registration |
+| BenchmarkRegistryGetAllAgents | 4810 | 19328 | 2 | Get all agents (100) |
+| BenchmarkRegistryGetAllAgentsLargePool | 51290 | 188419 | 2 | Get all agents (1000) |
+| BenchmarkRegistryGetAgentByID | 27.06 | 0 | 0 | Map lookup - zero alloc |
+| BenchmarkRegistryRelease | 14.49 | 0 | 0 | Agent release - zero alloc |
+| BenchmarkRegistryCleanupStaleAgents | 38.58 | 0 | 0 | Stale cleanup - zero alloc |
+| BenchmarkParallelAllocate | 1513 | 1016 | 6 | Concurrent allocation |
 
 Run benchmarks with:
 ```bash
