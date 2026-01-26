@@ -41,7 +41,6 @@ const (
 type SandboxReconciler struct {
 	client.Client
 	Scheme      *runtime.Scheme
-	Ctx         context.Context
 	Registry    agentpool.AgentRegistry
 	AgentClient api.AgentAPIClient
 }
@@ -565,8 +564,10 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 			WorkingDir: sandbox.Spec.WorkingDir,
 		},
 	})
-
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create sandbox on agent %s: %w", agent.PodIP, err)
+	}
+	return nil
 }
 
 // deleteFromAgent sends a delete request to the Agent.
@@ -580,8 +581,10 @@ func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1a
 	_, err := r.AgentClient.DeleteSandbox(agent.PodIP, &api.DeleteSandboxRequest{
 		SandboxID: sandbox.Name,
 	})
-
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to delete sandbox from agent %s: %w", agent.PodIP, err)
+	}
+	return nil
 }
 
 // syncStatusFromAgent synchronizes sandbox status from Agent's reported status.

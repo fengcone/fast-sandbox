@@ -69,7 +69,6 @@ func main() {
 	if err = (&controller.SandboxReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
-		Ctx:         context.Background(),
 		Registry:    reg,
 		AgentClient: agentHTTPClient,
 	}).SetupWithManager(mgr); err != nil {

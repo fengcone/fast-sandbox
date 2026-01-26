@@ -164,7 +164,6 @@ func newTestReconciler(scheme *runtime.Scheme, objs []client.Object, registry *C
 	return &SandboxReconciler{
 		Client:      builder.Build(),
 		Scheme:      scheme,
-		Ctx:         context.Background(),
 		Registry:    registry,
 		AgentClient: agentClient,
 	}
