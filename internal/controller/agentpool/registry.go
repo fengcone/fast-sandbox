@@ -13,6 +13,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Lock ordering convention:
+// 1. Always acquire registry-level locks (r.mu) before slot-level locks (slot.mu)
+// 2. Never hold r.mu while performing expensive operations or I/O
+// 3. Release r.mu before acquiring slot.mu whenever possible to minimize contention
+// 4. This prevents deadlocks and improves concurrency
+
 // AgentID is a logical identifier for an agent instance.
 type AgentID string
 
@@ -107,6 +113,7 @@ func (r *InMemoryRegistry) RegisterOrUpdate(info AgentInfo) {
 func (r *InMemoryRegistry) CleanupStaleAgents(timeout time.Duration) int {
 	now := time.Now()
 
+	// First pass: collect potential stale agents under read lock
 	r.mu.RLock()
 	slots := make([]*agentSlot, 0, len(r.agents))
 	ids := make([]AgentID, 0, len(r.agents))
@@ -125,10 +132,23 @@ func (r *InMemoryRegistry) CleanupStaleAgents(timeout time.Duration) int {
 		slot.mu.RUnlock()
 	}
 
+	// Second pass: verify and delete under write lock
+	// We need to re-check that the agent still exists and is still stale
 	if len(staleAgents) > 0 {
 		r.mu.Lock()
 		for _, id := range staleAgents {
-			delete(r.agents, id)
+			if slot, exists := r.agents[id]; exists {
+				// Re-verify the agent is still stale before deleting
+				// Note: We don't hold slot.mu here to avoid lock ordering issues.
+				// This is a best-effort cleanup; if the agent just updated its heartbeat,
+				// it will be cleaned up in the next cycle.
+				slot.mu.RLock()
+				stale := now.Sub(slot.info.LastHeartbeat) > timeout
+				slot.mu.RUnlock()
+				if stale {
+					delete(r.agents, id)
+				}
+			}
 		}
 		r.mu.Unlock()
 	}
@@ -325,14 +345,24 @@ func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
 		return err
 	}
 
+	// Lock ordering: Always acquire r.mu before slot.mu to maintain consistency
+	// with other operations in this file. We hold r.mu while creating slots,
+	// then release it before modifying individual slot contents to minimize
+	// lock contention.
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	var slotsToRestore []struct {
+		id       AgentID
+		sb       *apiv1alpha1.Sandbox
+		create   bool
+		slot     *agentSlot
+	}
 
 	for _, sb := range sbList.Items {
 		if sb.Status.AssignedPod != "" {
 			id := AgentID(sb.Status.AssignedPod)
 			slot, ok := r.agents[id]
 			if !ok {
+				// Create new slot but don't modify contents yet
 				slot = &agentSlot{
 					info: AgentInfo{
 						ID:              id,
@@ -343,22 +373,41 @@ func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
 					},
 				}
 				r.agents[id] = slot
+				slotsToRestore = append(slotsToRestore, struct {
+					id       AgentID
+					sb       *apiv1alpha1.Sandbox
+					create   bool
+					slot     *agentSlot
+				}{id, &sb, true, slot})
+			} else {
+				slotsToRestore = append(slotsToRestore, struct {
+					id       AgentID
+					sb       *apiv1alpha1.Sandbox
+					create   bool
+					slot     *agentSlot
+				}{id, &sb, false, slot})
 			}
-
-			slot.mu.Lock()
-			if slot.info.UsedPorts == nil {
-				slot.info.UsedPorts = make(map[int32]bool)
-			}
-			if slot.info.SandboxStatuses == nil {
-				slot.info.SandboxStatuses = make(map[string]api.SandboxStatus)
-			}
-			slot.info.Allocated++
-			for _, p := range sb.Spec.ExposedPorts {
-				slot.info.UsedPorts[p] = true
-			}
-			slot.mu.Unlock()
 		}
 	}
+	r.mu.Unlock()
+
+	// Now modify each slot's contents without holding r.mu
+	// This prevents lock ordering issues and minimizes critical section time
+	for _, item := range slotsToRestore {
+		item.slot.mu.Lock()
+		if item.slot.info.UsedPorts == nil {
+			item.slot.info.UsedPorts = make(map[int32]bool)
+		}
+		if item.slot.info.SandboxStatuses == nil {
+			item.slot.info.SandboxStatuses = make(map[string]api.SandboxStatus)
+		}
+		item.slot.info.Allocated++
+		for _, p := range item.sb.Spec.ExposedPorts {
+			item.slot.info.UsedPorts[p] = true
+		}
+		item.slot.mu.Unlock()
+	}
+
 	return nil
 }
 
