@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // AgentAPIClient defines the interface for communicating with sandbox agents.
@@ -48,6 +51,19 @@ func (c *AgentClient) SetTimeout(timeout time.Duration) {
 
 // CreateSandbox sends a create sandbox request to the agent.
 func (c *AgentClient) CreateSandbox(agentIP string, req *CreateSandboxRequest) (*CreateSandboxResponse, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		klog.V(2).InfoS("Agent CreateSandbox RPC",
+			"endpoint", agentIP,
+			"sandboxID", req.Sandbox.SandboxID,
+			"duration_ms", duration.Milliseconds())
+	}()
+
+	if req.Sandbox.SandboxID == "" {
+		return nil, errors.New("sandboxID is required")
+	}
+
 	url := fmt.Sprintf("http://%s:%d/api/v1/agent/create", agentIP, c.agentPort)
 
 	body, err := json.Marshal(req)
@@ -81,6 +97,15 @@ func (c *AgentClient) CreateSandbox(agentIP string, req *CreateSandboxRequest) (
 
 // DeleteSandbox sends a delete sandbox request to the agent.
 func (c *AgentClient) DeleteSandbox(agentIP string, req *DeleteSandboxRequest) (*DeleteSandboxResponse, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		klog.V(2).InfoS("Agent DeleteSandbox RPC",
+			"endpoint", agentIP,
+			"sandboxID", req.SandboxID,
+			"duration_ms", duration.Milliseconds())
+	}()
+
 	url := fmt.Sprintf("http://%s:%d/api/v1/agent/delete", agentIP, c.agentPort)
 
 	body, err := json.Marshal(req)
