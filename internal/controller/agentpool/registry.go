@@ -170,23 +170,30 @@ func (r *InMemoryRegistry) GetAgentByID(id AgentID) (AgentInfo, bool) {
 }
 
 func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error) {
+	totalStart := time.Now()
+
 	for _, p := range sb.Spec.ExposedPorts {
 		if p < 1 || p > 65535 {
 			return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", p)
 		}
 	}
 
+	// 1. Find candidates
+	candidateStart := time.Now()
 	r.mu.RLock()
 	candidates := make([]*agentSlot, 0, len(r.agents))
 	for _, slot := range r.agents {
 		candidates = append(candidates, slot)
 	}
 	r.mu.RUnlock()
+	candidateDuration := time.Since(candidateStart)
 
 	var bestSlot *agentSlot
 	var minScore = 1000000
 	var imageHit bool
 
+	// 2. Score agents and select best
+	scoreStart := time.Now()
 	for _, slot := range candidates {
 		slot.mu.RLock()
 		info := slot.info
@@ -239,11 +246,14 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 			imageHit = hasImage
 		}
 	}
+	scoreDuration := time.Since(scoreStart)
 
 	if bestSlot == nil {
 		return nil, fmt.Errorf("insufficient capacity or port conflict in pool %s", sb.Spec.PoolRef)
 	}
 
+	// 3. Final allocation
+	selectStart := time.Now()
 	bestSlot.mu.Lock()
 	defer bestSlot.mu.Unlock()
 
@@ -264,8 +274,18 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 	for _, p := range sb.Spec.ExposedPorts {
 		bestSlot.info.UsedPorts[p] = true
 	}
+	selectDuration := time.Since(selectStart)
+	totalDuration := time.Since(totalStart)
 
-	klog.V(2).Info("Registry allocation", "sandbox", sb.Name, "selectedAgent", info.ID, "imageHit", imageHit, "queueSize", len(candidates))
+	klog.V(2).InfoS("Registry Allocate timing",
+		"sandbox", sb.Name,
+		"total_ms", totalDuration.Milliseconds(),
+		"candidate_ms", candidateDuration.Milliseconds(),
+		"score_ms", scoreDuration.Milliseconds(),
+		"select_ms", selectDuration.Milliseconds(),
+		"selectedAgent", info.ID,
+		"imageHit", imageHit,
+		"agentCount", len(candidates))
 
 	res := bestSlot.info
 	return &res, nil
