@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -123,6 +125,11 @@ func main() {
 	}
 
 	klog.InfoS("starting manager")
+
+	go func() {
+		klog.InfoS("Starting pprof server", "address", ":6060")
+		klog.ErrorS(http.ListenAndServe("localhost:6060", nil), "pprof server exited")
+	}()
 
 	go func() {
 		if mgr.GetCache().WaitForCacheSync(context.Background()) {
