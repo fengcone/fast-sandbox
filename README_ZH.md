@@ -18,6 +18,7 @@ Fast Sandbox 是一个高性能、云原生（Kubernetes-native）的沙箱管�
 ## 系统架构
 
 系统采用"控制面集中决策，数据面极速执行"的架构：
+![ARCHITECTURE](ARCHITECTURE.png)
 
 ### 控制面 (Control Plane)
 - **Fast-Path Server (gRPC)**: 处理高并发的沙箱创建/删除请求，直接对接 CLI

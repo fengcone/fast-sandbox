@@ -18,6 +18,7 @@ By pre-warming "Agent Pod" resource pools and directly integrating with host-lev
 ## Architecture
 
 The system uses a "centralized control plane decision, extreme data plane execution" architecture:
+![ARCHITECTURE](ARCHITECTURE.png)
 
 ### Control Plane
 - **Fast-Path Server (gRPC)**: Handles high-concurrency sandbox create/delete requests, direct CLI access
