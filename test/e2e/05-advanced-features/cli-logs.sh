@@ -32,6 +32,8 @@ spec:
       containers: [{ name: agent, image: "$AGENT_IMAGE" }]
 EOF
     wait_for_pod "fast-sandbox.io/pool=$POOL" 60 "$TEST_NS"
+    # 等待 Agent HTTP 端点真正就绪
+    wait_for_agent_ready "fast-sandbox.io/pool=$POOL" "$TEST_NS"
 
     # 建立 Controller port-forward (fsb-ctl run 需要 Fast-Path gRPC 连接)
     kubectl port-forward deployment/fast-sandbox-controller -n "$CTRL_NS" 9090:9090 >/dev/null 2>&1 &
@@ -66,11 +68,29 @@ EOF
     fi
 
     # 2. 获取 Agent Pod 并建立转发 (使用动态端口)
-    # 等待 Sandbox 分配完成
+    # 等待 Sandbox 分配完成并稳定
     if ! wait_for_condition "kubectl get sandbox '$SB_NAME' -n '$TEST_NS' -o jsonpath='{.status.assignedPod}' | grep -q '.'" 30 "Sandbox assigned"; then
         echo "  ❌ Sandbox 分配超时"
         return 1
     fi
+
+    # 等待 sandbox 完全就绪（phase=Bound/Running 且容器已启动）
+    echo "  等待 Sandbox 完全就绪..."
+    local ready=false
+    for i in {1..15}; do
+        PHASE=$(kubectl get sandbox "$SB_NAME" -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [ "$PHASE" = "Bound" ] || [ "$PHASE" = "Running" ]; then
+            ready=true
+            break
+        fi
+        sleep 1
+    done
+    if [ "$ready" = "false" ]; then
+        echo "  ❌ Sandbox 就绪超时"
+        return 1
+    fi
+    # 额外等待容器输出日志
+    sleep 3
 
     AGENT_POD=$(kubectl get sandbox "$SB_NAME" -n "$TEST_NS" -o jsonpath='{.status.assignedPod}')
     if [ -z "$AGENT_POD" ]; then

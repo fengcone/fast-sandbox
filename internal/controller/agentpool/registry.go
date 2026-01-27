@@ -323,11 +323,12 @@ func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
 
-	if _, exists := slot.info.SandboxStatuses[sb.Name]; !exists && len(slot.info.SandboxStatuses) > 0 {
-		for _, p := range sb.Spec.ExposedPorts {
-			delete(slot.info.UsedPorts, p)
-		}
-		return
+	// Always release allocated slot - sandbox may have already been removed from
+	// SandboxStatuses due to async deletion or heartbeat sync delay.
+	// The presence or absence of the sandbox in statuses doesn't matter for
+	// allocated count, only whether this specific sandbox was counting against capacity.
+	if _, exists := slot.info.SandboxStatuses[sb.Name]; exists {
+		delete(slot.info.SandboxStatuses, sb.Name)
 	}
 
 	if slot.info.Allocated > 0 {
@@ -336,7 +337,6 @@ func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
 	for _, p := range sb.Spec.ExposedPorts {
 		delete(slot.info.UsedPorts, p)
 	}
-	delete(slot.info.SandboxStatuses, sb.Name)
 }
 
 func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
@@ -351,10 +351,10 @@ func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
 	// lock contention.
 	r.mu.Lock()
 	var slotsToRestore []struct {
-		id       AgentID
-		sb       *apiv1alpha1.Sandbox
-		create   bool
-		slot     *agentSlot
+		id     AgentID
+		sb     *apiv1alpha1.Sandbox
+		create bool
+		slot   *agentSlot
 	}
 
 	for _, sb := range sbList.Items {
@@ -374,17 +374,17 @@ func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {
 				}
 				r.agents[id] = slot
 				slotsToRestore = append(slotsToRestore, struct {
-					id       AgentID
-					sb       *apiv1alpha1.Sandbox
-					create   bool
-					slot     *agentSlot
+					id     AgentID
+					sb     *apiv1alpha1.Sandbox
+					create bool
+					slot   *agentSlot
 				}{id, &sb, true, slot})
 			} else {
 				slotsToRestore = append(slotsToRestore, struct {
-					id       AgentID
-					sb       *apiv1alpha1.Sandbox
-					create   bool
-					slot     *agentSlot
+					id     AgentID
+					sb     *apiv1alpha1.Sandbox
+					create bool
+					slot   *agentSlot
 				}{id, &sb, false, slot})
 			}
 		}

@@ -34,6 +34,7 @@ spec:
       containers: [{ name: agent, image: "$AGENT_IMAGE" }]
 EOF
     wait_for_pod "fast-sandbox.io/pool=$POOL_1" 60 "$TEST_NS"
+    wait_for_agent_ready "fast-sandbox.io/pool=$POOL_1" "$TEST_NS"
 
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
@@ -94,6 +95,7 @@ spec:
       containers: [{ name: agent, image: "$AGENT_IMAGE" }]
 EOF
     wait_for_pod "fast-sandbox.io/pool=$POOL_2" 60 "$TEST_NS"
+    wait_for_agent_ready "fast-sandbox.io/pool=$POOL_2" "$TEST_NS"
 
     kubectl port-forward deployment/fast-sandbox-controller -n "$CTRL_NS" 9090:9090 >/dev/null 2>&1 &
     PF_PID=$!
@@ -139,6 +141,7 @@ spec:
       containers: [{ name: agent, image: "$AGENT_IMAGE" }]
 EOF
         wait_for_pod "fast-sandbox.io/pool=$POOL_3" 60 "$TEST_NS"
+        wait_for_agent_ready "fast-sandbox.io/pool=$POOL_3" "$TEST_NS"
 
         kubectl port-forward deployment/fast-sandbox-controller -n "$CTRL_NS" 9090:9090 >/dev/null 2>&1 &
         PF_PID=$!

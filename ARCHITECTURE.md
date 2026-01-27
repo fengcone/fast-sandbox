@@ -15,7 +15,7 @@ The system uses a **Controller-Agent** separation architecture built on Kubernet
 │                         Control Plane                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │   CLI/CRD    │  │ Fast-Path    │  │  Sandbox     │         │
-│  │    Input     │→│   gRPC       │→│  Controller  │         │
+│  │    Input     │→ │   gRPC       │→ │  Controller  │         │
 │  └──────────────┘  │   Server     │  │              │         │
 │                    └──────┬───────┘  └───────┬───────┘         │
 │                           │                   │                  │
@@ -185,8 +185,8 @@ User                    Controller                  Agent
   │                         │<────────────────────────┤
   │                         │  (ContainerID)          │
   │                         │                         │
-  │<─────────────────────────┤                         │
-  │  (Success, Endpoints)    │                         │
+  │<────────────────────────┤                         │
+  │  (Success, Endpoints)   │                         │
   │                         │                         │
   │                         ├─ async: Create CRD ────>│ (K8s)
 ```
@@ -219,7 +219,7 @@ User                    Controller              K8s                 Agent
   │                         │                    │                    │
   │                         ├─ Update CRD ──────>│                    │
   │                         │  (Phase: Running)   │                    │
-  │<─────────────────────────┤                    │                    │
+  │<────────────────────────┤                    │                    │
   │  (Success)              │                    │                    │
 ```
 

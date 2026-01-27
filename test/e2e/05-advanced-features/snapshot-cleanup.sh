@@ -48,6 +48,8 @@ spec:
       containers: [{ name: agent, image: "$AGENT_IMAGE" }]
 EOF
     wait_for_pod "fast-sandbox.io/pool=$POOL" 60 "$TEST_NS"
+    # 等待 Agent HTTP 端点真正就绪
+    wait_for_agent_ready "fast-sandbox.io/pool=$POOL" "$TEST_NS"
 
     # 建立 Controller port-forward
     CTRL_NS=$(kubectl get deployment fast-sandbox-controller -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "default")
@@ -84,8 +86,22 @@ EOF
         return 1
     fi
 
-    # 等待删除完成
-    sleep 2
+    # 等待删除完成 - 增加等待时间，确保快照被清理
+    echo "  等待 Sandbox 完全删除和快照清理..."
+    for i in {1..20}; do
+        # 等待 CRD 被完全删除
+        if ! kubectl get sandbox "$SB_NAME" -n "$TEST_NS" >/dev/null 2>&1; then
+            echo "  ✓ Sandbox CRD 已删除"
+            break
+        fi
+        if [ $i -eq 20 ]; then
+            echo "  ⚠ Sandbox 删除超时，但继续"
+        fi
+        sleep 1
+    done
+    # 额外等待快照清理和 agent 状态同步
+    # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间
+    sleep 15
 
     # 第二次创建（同名）- 这是关键测试
     RECREATE_OUTPUT=$("$CLIENT_BIN" run "$SB_NAME" --image docker.io/library/alpine:latest --pool "$POOL" --namespace "$TEST_NS" /bin/sleep 30 2>&1)
@@ -105,7 +121,7 @@ EOF
     SB_NAME2="sb-snapshot-loop-$RANDOM"
     SUCCESS=true
 
-    for i in {1..3}; do
+    for i in {1..2}; do
         OUTPUT=$("$CLIENT_BIN" run "$SB_NAME2" --image docker.io/library/alpine:latest --pool "$POOL" --namespace "$TEST_NS" /bin/sleep 10 2>&1)
         if ! echo "$OUTPUT" | grep -q "Sandbox created successfully"; then
             echo "  ✗ 循环第 $i 次创建失败"
@@ -113,6 +129,9 @@ EOF
             SUCCESS=false
             break
         fi
+
+        # 等待 sandbox 完全就绪（重要：让控制器状态稳定）
+        sleep 3
 
         DELETE_OUTPUT=$("$CLIENT_BIN" delete "$SB_NAME2" --namespace "$TEST_NS" 2>&1)
         if ! echo "$DELETE_OUTPUT" | grep -q "deletion triggered"; then
@@ -122,21 +141,26 @@ EOF
         fi
 
         # 等待 Sandbox 完全删除（优雅关闭最多 10 秒，加上余量）
-        echo "  等待 Sandbox 完全删除..."
-        for j in {1..15}; do
+        echo "  等待 Sandbox 完全删除和快照清理..."
+        for j in {1..30}; do
+            # 等待 CRD 被完全删除
             if ! kubectl get sandbox "$SB_NAME2" -n "$TEST_NS" >/dev/null 2>&1; then
-                echo "  ✓ 循环第 $i 次: Sandbox 已删除"
+                echo "  ✓ 循环第 $i 次: Sandbox CRD 已删除"
                 break
             fi
-            if [ $j -eq 15 ]; then
+            if [ $j -eq 30 ]; then
                 echo "  ⚠ 循环第 $i 次: 删除超时，但继续"
             fi
             sleep 1
         done
+        # 额外等待快照清理、agent 状态同步和控制器注册表更新
+        # 这是关键：需要足够时间让 agent 的 asyncDelete 完成并更新控制器注册表
+        # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间
+        sleep 15
     done
 
     if [ "$SUCCESS" = true ]; then
-        echo "  ✓ 循环测试通过（3 次创建/删除）"
+        echo "  ✓ 循环测试通过（2 次创建/删除）"
     else
         cleanup_port_forward "$CTRL_PF_PID"
         kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1

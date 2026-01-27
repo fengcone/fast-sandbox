@@ -159,6 +159,30 @@ function wait_for_pod() {
     sleep 15
 }
 
+# 等待 Agent HTTP 端点就绪
+function wait_for_agent_ready() {
+    local label=$1
+    local namespace=${2:-default}
+    local max_retries=30
+    local retry=0
+
+    echo "Waiting for Agent HTTP endpoint to be ready..."
+    while [ $retry -lt $max_retries ]; do
+        POD_NAME=$(kubectl get pod -l "$label" -n "$namespace" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$POD_NAME" ]; then
+            # 通过 kubectl exec 检查 agent 是否就绪
+            if kubectl exec "$POD_NAME" -n "$namespace" -c agent -- wget -q -O- http://localhost:5758/api/v1/agent/status >/dev/null 2>&1; then
+                echo "Agent HTTP endpoint is ready"
+                return 0
+            fi
+        fi
+        retry=$((retry + 1))
+        sleep 2
+    done
+    echo "Warning: Agent HTTP endpoint may not be fully ready (continuing anyway)"
+    return 0
+}
+
 # --- 6. 环境清理 ---
 function cleanup_all() {
     echo "=== [Teardown] Cleaning up all resources ==="

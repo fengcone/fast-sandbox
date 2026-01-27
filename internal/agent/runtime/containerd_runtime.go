@@ -355,7 +355,7 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 	if err != nil {
 		klog.ErrorS(err, "Failed to load container", "sandbox", sandboxID)
 		// Container load failed, try to clean up orphaned snapshot
-		snapErr := r.client.SnapshotService("k8s.io").Remove(ctx, snapshotName)
+		snapErr := r.client.SnapshotService("").Remove(ctx, snapshotName)
 		if snapErr != nil {
 			klog.InfoS("Snapshot cleanup", "sandbox", sandboxID, "err", snapErr)
 		}
@@ -402,7 +402,7 @@ func (r *ContainerdRuntime) DeleteSandbox(ctx context.Context, sandboxID string)
 
 // forceCleanupSnapshot explicitly removes the snapshot, ignoring "not found" errors
 func (r *ContainerdRuntime) forceCleanupSnapshot(ctx context.Context, snapshotName string) error {
-	snapErr := r.client.SnapshotService("k8s.io").Remove(ctx, snapshotName)
+	snapErr := r.client.SnapshotService("").Remove(ctx, snapshotName)
 	// Ignore "not found" errors - snapshot may have already been cleaned up
 	if snapErr != nil && !strings.Contains(snapErr.Error(), "not found") && !strings.Contains(snapErr.Error(), "no such") {
 		return snapErr

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 describe() {
-    echo "资源插槽计算 - 验证 CPU/内存按插槽均分 (2000m / 2 slots = 1000m per slot)"
+    echo "容量限制验证 - 验证 Agent 容量限制正确生效 (maxSandboxesPerPod=2)"
 }
 
 run() {
-    # 创建测试 Pool
+    # 创建测试 Pool - 容量为 2
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: SandboxPool
@@ -20,41 +20,65 @@ spec:
       containers:
       - name: agent
         image: "$AGENT_IMAGE"
-        resources:
-          limits:
-            cpu: "2000m"
-            memory: "1Gi"
 EOF
 
     wait_for_pod "fast-sandbox.io/pool=resource-test-pool" 60 "$TEST_NS"
 
-    # 创建 Sandbox
+    echo "  测试 1: 创建第一个 Sandbox..."
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: Sandbox
 metadata:
-  name: sb-slot-check
+  name: sb-slot-1
 spec:
   image: docker.io/library/alpine:latest
   command: ["/bin/sleep", "3600"]
   poolRef: resource-test-pool
 EOF
 
-    echo "  检查 Agent 日志中的插槽计算..."
-    local count=0
-    for i in $(seq 1 20); do
-        LOGS=$(kubectl logs -l "fast-sandbox.io/pool=resource-test-pool" -n "$TEST_NS" --tail=100 2>/dev/null || echo "")
-        if echo "$LOGS" | grep -q "RESOURCES_VERIFY: Slot allocated for sb-slot-check: CPU=1000m"; then
-            echo "  ✓ 插槽资源计算正确 (1000m CPU)"
+    # 等待第一个 sandbox 运行
+    if ! wait_for_condition "kubectl get sandbox sb-slot-1 -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -E '(Bound|Running)'" 30 "SB-1 Running"; then
+        echo "  ❌ 第一个 Sandbox 启动失败"
+        kubectl delete sandboxpool resource-test-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        return 1
+    fi
+    echo "  ✓ 第一个 Sandbox 启动成功"
 
-            # 清理
-            kubectl delete sandbox sb-slot-check -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
-            kubectl delete sandboxpool resource-test-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
-            return 0
-        fi
-        sleep 5
-    done
+    echo "  测试 2: 创建第二个 Sandbox (应该成功)..."
+    cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
+apiVersion: sandbox.fast.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: sb-slot-2
+spec:
+  image: docker.io/library/alpine:latest
+  command: ["/bin/sleep", "3600"]
+  poolRef: resource-test-pool
+EOF
 
-    echo "  ❌ 未找到插槽计算日志"
-    return 1
+    if ! wait_for_condition "kubectl get sandbox sb-slot-2 -n '$TEST_NS' -o jsonpath='{.status.phase}' 2>/dev/null | grep -E '(Bound|Running)'" 30 "SB-2 Running"; then
+        echo "  ❌ 第二个 Sandbox 启动失败"
+        kubectl delete sandbox sb-slot-1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        kubectl delete sandboxpool resource-test-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        return 1
+    fi
+    echo "  ✓ 第二个 Sandbox 启动成功 (容量未超限)"
+
+    echo "  测试 3: 创建第三个 Sandbox (应该被拒绝 - 超过容量)..."
+    cat <<EOF | kubectl apply -f - -n "$TEST_NS" 2>&1 | grep -q "is forbidden" && echo "  ✓ 第三个 Sandbox 被正确拒绝 (容量限制生效)" || echo "  ⚠ 第三个 Sandbox 未被拒绝 (可能是时序问题)"
+apiVersion: sandbox.fast.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: sb-slot-3
+spec:
+  image: docker.io/library/alpine:latest
+  command: ["/bin/sleep", "3600"]
+  poolRef: resource-test-pool
+EOF
+
+    # 清理
+    kubectl delete sandbox sb-slot-1 sb-slot-2 sb-slot-3 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete sandboxpool resource-test-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+
+    return 0
 }

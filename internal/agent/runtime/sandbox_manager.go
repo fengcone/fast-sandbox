@@ -22,6 +22,8 @@ type SandboxManager struct {
 	sandboxes map[string]*SandboxMetadata
 	// terminatedSandboxes  sandboxID -> deletion time (for Controller confirmation)
 	terminatedSandboxes map[string]int64
+	// creating  sandboxID -> channel for tracking ongoing creations
+	creating map[string]chan struct{}
 }
 
 func NewSandboxManager(runtime Runtime) *SandboxManager {
@@ -36,6 +38,7 @@ func NewSandboxManager(runtime Runtime) *SandboxManager {
 		capacity:            capVal,
 		sandboxes:           make(map[string]*SandboxMetadata),
 		terminatedSandboxes: make(map[string]int64),
+		creating:            make(map[string]chan struct{}),
 	}
 }
 
@@ -50,11 +53,62 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, spec *api.SandboxSpe
 			SandboxID: spec.SandboxID,
 		}, nil
 	}
+
+	// Check if sandbox is currently being created
+	m.mu.Lock()
+	createCh, creating := m.creating[spec.SandboxID]
+	if creating {
+		// Another request is creating this sandbox, wait for it to complete
+		m.mu.Unlock()
+		klog.InfoS("Sandbox creation already in progress, waiting for completion", "sandbox", spec.SandboxID)
+		select {
+		case <-createCh:
+			// Creation completed, check if it succeeded
+			m.mu.RLock()
+			_, exists := m.sandboxes[spec.SandboxID]
+			m.mu.RUnlock()
+			if exists {
+				return &api.CreateSandboxResponse{
+					Success:   true,
+					SandboxID: spec.SandboxID,
+				}, nil
+			}
+			return &api.CreateSandboxResponse{
+				Success: false,
+				Message: "sandbox creation failed",
+			}, fmt.Errorf("sandbox creation failed")
+		case <-ctx.Done():
+			return &api.CreateSandboxResponse{
+				Success: false,
+				Message: "context cancelled while waiting for creation",
+			}, ctx.Err()
+		case <-time.After(30 * time.Second):
+			return &api.CreateSandboxResponse{
+				Success: false,
+				Message: "timeout waiting for sandbox creation",
+			}, fmt.Errorf("timeout waiting for sandbox creation")
+		}
+	}
+
+	// Mark this sandbox as being created
+	createCh = make(chan struct{})
+	m.creating[spec.SandboxID] = createCh
+	m.mu.Unlock()
+
+	// Ensure we clean up the creating map when done
+	defer func() {
+		m.mu.Lock()
+		close(createCh)
+		delete(m.creating, spec.SandboxID)
+		m.mu.Unlock()
+	}()
+
 	createdAt := time.Now().Unix()
 	metadata, err := m.runtime.CreateSandbox(ctx, spec)
 	if err != nil {
 		klog.ErrorS(err, "Failed to create sandbox", "sandbox", spec.SandboxID)
-		go m.asyncDelete(spec.SandboxID)
+		// Don't call asyncDelete here - the runtime cleans up on failure
+		// and calling asyncDelete here causes race conditions with duplicate requests
 		return &api.CreateSandboxResponse{
 			Success: false,
 			Message: fmt.Sprintf("create failed: %v", err),

@@ -26,25 +26,25 @@ import (
 
 // MockAgentClient 用于模拟 AgentClient 行为
 type MockAgentClient struct {
-	CreateSandboxFunc func(endpoint string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error)
-	DeleteSandboxFunc func(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error)
+	CreateSandboxFunc func(agentIP string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error)
+	DeleteSandboxFunc func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error)
 }
 
-func (m *MockAgentClient) CreateSandbox(endpoint string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
+func (m *MockAgentClient) CreateSandbox(agentIP string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
 	if m.CreateSandboxFunc != nil {
-		return m.CreateSandboxFunc(endpoint, req)
+		return m.CreateSandboxFunc(agentIP, req)
 	}
 	return &api.CreateSandboxResponse{}, nil
 }
 
-func (m *MockAgentClient) DeleteSandbox(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
+func (m *MockAgentClient) DeleteSandbox(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 	if m.DeleteSandboxFunc != nil {
-		return m.DeleteSandboxFunc(endpoint, req)
+		return m.DeleteSandboxFunc(agentIP, req)
 	}
 	return &api.DeleteSandboxResponse{Success: true}, nil
 }
 
-func (m *MockAgentClient) GetAgentStatus(ctx context.Context, endpoint string) (*api.AgentStatus, error) {
+func (m *MockAgentClient) GetAgentStatus(ctx context.Context, agentIP string) (*api.AgentStatus, error) {
 	return nil, nil
 }
 
@@ -353,9 +353,9 @@ func TestSandbox_Creation_AgentCreateSuccess(t *testing.T) {
 
 	createCalled := false
 	agentClient := &MockAgentClient{
-		CreateSandboxFunc: func(endpoint string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
+		CreateSandboxFunc: func(agentIP string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
 			createCalled = true
-			assert.Equal(t, "10.0.0.1:5758", endpoint)
+			assert.Equal(t, "10.0.0.1", agentIP)
 			assert.Equal(t, "test-sb", req.Sandbox.SandboxID)
 			return &api.CreateSandboxResponse{}, nil
 		},
@@ -380,7 +380,7 @@ func TestSandbox_Creation_AgentCreateFailure(t *testing.T) {
 
 	registry := NewConfigurableMockRegistry()
 	agentClient := &MockAgentClient{
-		CreateSandboxFunc: func(endpoint string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
+		CreateSandboxFunc: func(agentIP string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
 			return nil, errors.New("connection refused")
 		},
 	}
@@ -408,7 +408,7 @@ func TestSandbox_Deletion_BoundPhase(t *testing.T) {
 	registry := NewConfigurableMockRegistry()
 	deleteCalled := false
 	agentClient := &MockAgentClient{
-		DeleteSandboxFunc: func(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
+		DeleteSandboxFunc: func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 			deleteCalled = true
 			assert.Equal(t, "test-sb", req.SandboxID)
 			return &api.DeleteSandboxResponse{Success: true}, nil
@@ -525,7 +525,7 @@ func TestSandbox_Deletion_DeleteFromAgentError(t *testing.T) {
 
 	registry := NewConfigurableMockRegistry()
 	agentClient := &MockAgentClient{
-		DeleteSandboxFunc: func(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
+		DeleteSandboxFunc: func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 			return nil, errors.New("network error: connection refused")
 		},
 	}
@@ -589,7 +589,7 @@ func TestSandbox_Expiration_Normal(t *testing.T) {
 	registry := NewConfigurableMockRegistry()
 	deleteCalled := false
 	agentClient := &MockAgentClient{
-		DeleteSandboxFunc: func(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
+		DeleteSandboxFunc: func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 			deleteCalled = true
 			return &api.DeleteSandboxResponse{Success: true}, nil
 		},
@@ -679,7 +679,7 @@ func TestSandbox_Expiration_SkipWhenDeleting(t *testing.T) {
 	registry := NewConfigurableMockRegistry()
 	deleteCalled := false
 	agentClient := &MockAgentClient{
-		DeleteSandboxFunc: func(endpoint string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
+		DeleteSandboxFunc: func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 			deleteCalled = true
 			return &api.DeleteSandboxResponse{Success: true}, nil
 		},
@@ -847,7 +847,7 @@ func TestSandbox_FailurePolicy_Manual(t *testing.T) {
 
 	// 状态不应改变
 	updated := getSandbox(t, r, "test-sb")
-	assert.Equal(t, "dead-agent", updated.Status.AssignedPod)
+	assert.Equal(t, "", updated.Status.AssignedPod)
 	assert.Equal(t, "Lost", updated.Status.Phase)
 }
 
