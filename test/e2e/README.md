@@ -1,85 +1,124 @@
-# Fast Sandbox E2E 测试指南
+# Fast Sandbox E2E Tests
 
-本目录包含 Fast Sandbox 的工业级端到端测试套件，旨在验证系统在各种极端场景下的可靠性、性能与自愈能力。
+端到端测试套件，验证 Fast Sandbox 的核心功能和用户场景。
 
-## 🧪 测试架构设计 (V2)
+## 测试套件结构
 
-测试套件已重构为 5 个核心模块，覆盖从基础验证到高级故障注入的全生命周期。
+### 01-basic-validation (基础验证)
 
-1.  **套件化管理**: 所有测试按功能领域分组（如 `01-basic`, `05-advanced`）。
-2.  **环境自愈**: `common.sh` 提供智能的资源清理与等待逻辑，支持 `FORCE_RECREATE_CLUSTER` 模式。
-3.  **CLI 集成**: 高级测试直接集成 `kubectl-fastsb` 官方二进制，验证真实的 CLI 交互链路。
-4.  **故障注入**: 通过 ValidatingWebhook 模拟 CRD 写入失败，验证 Janitor 的物理闭环能力。
+测试 CRD API 的基础校验和基本功能。
 
-## 📂 测试套件概览
+- `crd-validation.sh` - API 字段校验（必填字段、空值、枚举）
+- `port-validation.sh` - 端口范围校验（0、65536 越界）
+- `namespace-isolation.sh` - 命名空间隔离（同 NS 调度成功，跨 NS 拒绝）
+- `env-workingdir.sh` - 环境变量和工作目录
 
-| 套件目录 | 描述 | 关键测试点 |
-| :--- | :--- | :--- |
-| **01-basic-validation** | 基础功能验证 | CRD 字段校验、端口范围检查、错误处理机制 |
-| **02-scheduling-resources** | 调度与资源 | 自动扩缩容、端口互斥调度、资源插槽(Slot)计算 |
-| **03-fault-recovery** | 故障恢复 | Controller 崩溃恢复、Agent 失联自愈、Finalizer 闭环清理 |
-| **04-cleanup-janitor** | 清理与运维 | 自动过期(Auto-Expiry)、跨命名空间支持、Janitor 孤儿回收 |
-| **05-advanced-features** | 高级特性 | **Fast-Path (Fast/Strong) 双模**、CLI 集成、Webhook 故障注入、gVisor 运行时 |
+### 02-scheduling-resources (调度与资源)
 
-## 🛠 如何运行测试
+测试 Sandbox 调度逻辑和资源分配。
 
-### 1. 运行单个套件 (推荐)
-每个套件目录下的 `test.sh` 是独立的可执行入口。
+- `resource-slot.sh` - 容量限制（maxSandboxesPerPod=2，第3个被拒绝）
+- `port-mutual-exclusion.sh` - 端口互斥调度（相同端口分配到不同 Pod）
+- `autoscaling.sh` - Pool 自动扩缩容（poolMin=1→2）
+
+### 03-lifecycle (生命周期)
+
+测试 Sandbox 完整生命周期，包括用户最关心的创建-删除-重建场景。
+
+- `basic-lifecycle.sh` - **核心测试**：创建→删除→同名重建完整流程（含循环测试）
+- `graceful-shutdown.sh` - 优雅关闭流程（SIGTERM → Terminating → 删除）
+
+### 04-cleanup-janitor (Janitor 与清理)
+
+测试过期清理和 Janitor 功能。
+
+- `namespace-aware.sh` - Janitor 正确处理非 default namespace
+- `janitor-recovery.sh` - Janitor 孤儿容器清理
+
+### 05-advanced-features (高级特性)
+
+测试高级功能和特性。
+
+- `fast-path.sh` - Fast/Strong 一致性模式、端口隔离、孤儿清理
+- `goroutine-leak.sh` - Controller Goroutine 泄漏防护
+- `snapshot-cleanup.sh` - 快照清理和同名重建（CLI 场景）
+
+### 06-cli-integration (CLI 集成)
+
+测试 CLI 工具与系统集成。
+
+- `cli-cache.sh` - CLI 缓存机制
+- `cli-logs.sh` - CLI 日志功能
+- `update-reset.sh` - 更新和重置功能
+
+### 07-fault-recovery (故障与恢复)
+
+测试故障场景和恢复机制。
+
+- `controlled-recovery.sh` - AutoRecreate 和 ResetRevision
+- `auto-expiry.sh` - 自动过期（expireTime 触发）
+- `memory-leak.sh` - Registry 内存泄漏防护
+
+## 运行测试
+
+### 运行所有测试套件
 
 ```bash
-# 运行基础验证
-./test/e2e/01-basic-validation/test.sh
-
-# 运行高级特性 (Fast-Path, CLI, Webhook)
-./test/e2e/05-advanced-features/test.sh
+cd test/e2e
+./common.sh
 ```
 
-### 2. 运行指定 Case
-套件脚本支持传入参数以运行特定的 Sub-case（模糊匹配）。
+### 运行特定套件
 
 ```bash
-# 只运行 Fast-Path 相关的测试
-./test/e2e/05-advanced-features/test.sh fast-path
+cd test/e2e/01-basic-validation
+./test.sh
 ```
 
-### 3. 全量回归
-按顺序执行所有套件，确保系统整体健康。
+### 运行特定测试（过滤）
 
 ```bash
-# 依次运行 01 -> 05
-export SKIP_BUILD=true  # 跳过重复构建，加速回归
-for i in test/e2e/0*/test.sh; do $i; done
+cd test/e2e
+./common.sh "lifecycle"
 ```
 
-## ⚙️ 环境变量与调试
+### 强制重建集群
 
-| 变量名 | 默认值 | 说明 |
-| :--- | :--- | :--- |
-| `SKIP_BUILD` | `""` | 设为 `true` 可跳过 `docker build` 和 `kind load`，仅运行测试逻辑（前提是镜像已加载）。 |
-| `FORCE_RECREATE_CLUSTER` | `false` | 设为 `true` 会在测试前**物理销毁并重建** KIND 集群，用于解决镜像缓存顽疾。 |
-| `CLUSTER_NAME` | `fast-sandbox` | 指定 KIND 集群名称。 |
-
-**示例：强制重建集群并运行高级测试**
 ```bash
-export FORCE_RECREATE_CLUSTER=true
-./test/e2e/05-advanced-features/test.sh
+FORCE_RECREATE_CLUSTER=true bash test/e2e/common.sh
 ```
 
-## 🔍 故障排查指南
+## 调试技巧
 
-1.  **Fast-Path 404 / Unimplemented**:
-    通常是因为 Controller 镜像未更新。
-    *   **解决**: 运行 `make build-controller-linux` 并 `kind load`，或者开启 `FORCE_RECREATE_CLUSTER=true`。
+### 查看 Controller 日志
 
-2.  **Janitor 清理超时**:
-    Janitor 默认扫描间隔为 2分钟。E2E 环境中通过 `--scan-interval=10s` 加速。
-    *   **检查**: `kubectl get ds -n fast-sandbox-system` 确认 Janitor 参数。
+```bash
+kubectl logs -l app=fast-sandbox-controller -n fast-sandbox-system --tail=50
+```
 
-3.  **Pod Never Appeared**:
-    通常发生在集群重建后，Controller 尚未完成 Leader Election。
-    *   **解决**: `common.sh` 中的 `wait_for_pod` 已内置重试逻辑，确保 Controller 心跳同步完成后再继续。
+### 查看 Agent 日志
 
-## ⚠️ 开发原则
-*   **Case 隔离**: 每个测试脚本(`*.sh`) 必须在退出时清理其创建的资源 (`trap cleanup EXIT`)。
-*   **命名空间隔离**: 高级测试（如 Webhook）应使用独立的命名空间，避免误删共享资源。
-*   **二进制一致性**: 测试脚本应优先使用 `bin/kubectl-fastsb` 等官方构建产物，而非临时 `go run`。
+```bash
+kubectl logs -l app=sandbox-agent -n <namespace> --all-containers --tail=50
+```
+
+### 查看 Sandbox 状态
+
+```bash
+kubectl get sandbox <name> -n <namespace> -o yaml
+```
+
+## 测试覆盖的核心场景
+
+1. ✅ **创建 → 删除 → 重建同名 Sandbox**（用户报告的 bug 场景）
+2. ✅ 容量限制和资源分配
+3. ✅ 端口冲突和互斥调度
+4. ✅ 命名空间隔离
+5. ✅ 自动扩缩容
+6. ✅ 优雅关闭和 Finalizer 清理
+7. ✅ Agent 丢失恢复（AutoRecreate/Manual）
+8. ✅ 自动过期
+9. ✅ Janitor 孤儿清理
+10. ✅ CLI 缓存和交互模式
+11. ✅ Fast/Strong 一致性模式
+12. ✅ 内存和 Goroutine 泄漏防护

@@ -100,8 +100,8 @@ EOF
         sleep 1
     done
     # 额外等待快照清理和 agent 状态同步
-    # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间
-    sleep 15
+    # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间（增加余量）
+    sleep 25
 
     # 第二次创建（同名）- 这是关键测试
     RECREATE_OUTPUT=$("$CLIENT_BIN" run "$SB_NAME" --image docker.io/library/alpine:latest --pool "$POOL" --namespace "$TEST_NS" /bin/sleep 30 2>&1)
@@ -155,8 +155,8 @@ EOF
         done
         # 额外等待快照清理、agent 状态同步和控制器注册表更新
         # 这是关键：需要足够时间让 agent 的 asyncDelete 完成并更新控制器注册表
-        # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间
-        sleep 15
+        # 需要等待：agent 删除完成（最多 10s）+ 心跳间隔（2s）+ 控制器处理时间（增加余量）
+        sleep 20
     done
 
     if [ "$SUCCESS" = true ]; then

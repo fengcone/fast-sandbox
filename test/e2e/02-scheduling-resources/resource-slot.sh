@@ -76,6 +76,14 @@ spec:
   poolRef: resource-test-pool
 EOF
 
+    echo "  测试 4: 删除不存在的资源..."
+    kubectl delete sandbox nonexistent-resource -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    if [ $? -le 1 ]; then
+        echo "  ✓ 删除不存在的资源优雅处理"
+    else
+        echo "  ⚠ 删除不存在的资源返回错误码 $?"
+    fi
+
     # 清理
     kubectl delete sandbox sb-slot-1 sb-slot-2 sb-slot-3 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandboxpool resource-test-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
