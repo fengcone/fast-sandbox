@@ -21,6 +21,7 @@ Fast Sandbox 是一个高性能、云原生（Kubernetes-native）的沙箱管�
 ![ARCHITECTURE](ARCHITECTURE.png)
 
 ### 控制面 (Control Plane)
+
 - **Fast-Path Server (gRPC)**: 处理高并发的沙箱创建/删除请求，直接对接 CLI
   - 端口: `9090`
   - 服务: `CreateSandbox`, `DeleteSandbox`, `UpdateSandbox`, `ListSandboxes`, `GetSandbox`
@@ -29,6 +30,7 @@ Fast Sandbox 是一个高性能、云原生（Kubernetes-native）的沙箱管�
 - **Atomic Registry**: 内存级的状态中心，支持高并发下的互斥分配与镜像权重计算
 
 ### 数据面 (Data Plane - Agent)
+
 - 运行在宿主机上的特权 Pod，通过 HTTP 与控制面通信
 - **Runtime Integration**: 直接调用宿主机 Containerd Socket，实现容器生命周期管理和**日志持久化**
 - **HTTP Server**: 监听端口 `5758`
@@ -38,6 +40,7 @@ Fast Sandbox 是一个高性能、云原生（Kubernetes-native）的沙箱管�
   - `GET /api/v1/agent/logs?follow=true` - 流式日志
 
 ### 工具链 (Tooling)
+
 - **fsb-ctl**: 开发者 CLI，支持 `run`, `list`, `get`, `logs`, `delete` 等命令
 
 ## 快速开始
@@ -84,6 +87,7 @@ spec:
 ## 一致性模式
 
 ### Fast Mode (默认)
+
 1. CLI → Controller gRPC 请求
 2. Registry 分配 Agent
 3. Controller → Agent HTTP 创建请求
@@ -95,6 +99,7 @@ spec:
 **权衡**: CRD 创建失败可能导致孤儿（由 Janitor 清理）
 
 ### Strong Mode
+
 1. CLI → Controller gRPC 请求
 2. Controller 创建 K8s CRD (Pending 阶段)
 3. Controller Watch 触发
@@ -109,26 +114,29 @@ spec:
 
 ### Controller 参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--agent-port` | `5758` | Agent HTTP 服务器端口 |
-| `--metrics-bind-address` | `:9091` | Prometheus 指标端点 |
-| `--health-probe-bind-address` | `:5758` | 健康检查端点 |
-| `--fastpath-consistency-mode` | `fast` | 一致性模式: fast 或 strong |
-| `--fastpath-orphan-timeout` | `10s` | Fast 模式孤儿清理超时 |
+
+| 参数                          | 默认值  | 说明                       |
+| ----------------------------- | ------- | -------------------------- |
+| `--agent-port`                | `5758`  | Agent HTTP 服务器端口      |
+| `--metrics-bind-address`      | `:9091` | Prometheus 指标端点        |
+| `--health-probe-bind-address` | `:5758` | 健康检查端点               |
+| `--fastpath-consistency-mode` | `fast`  | 一致性模式: fast 或 strong |
+| `--fastpath-orphan-timeout`   | `10s`   | Fast 模式孤儿清理超时      |
 
 ### Agent 参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
+
+| 参数                  | 默认值                            | 说明                   |
+| --------------------- | --------------------------------- | ---------------------- |
 | `--containerd-socket` | `/run/containerd/containerd.sock` | Containerd socket 路径 |
-| `--http-port` | `5758` | HTTP 服务器端口 |
+| `--http-port`         | `5758`                            | HTTP 服务器端口        |
 
 ### 环境变量
 
-| 变量 | 说明 |
-|------|------|
-| `AGENT_CAPACITY` | 每个 Agent 最大沙箱数（默认: 5）|
+
+| 变量             | 说明                             |
+| ---------------- | -------------------------------- |
+| `AGENT_CAPACITY` | 每个 Agent 最大沙箱数（默认: 5） |
 
 ## gRPC API
 
@@ -143,10 +151,12 @@ service FastPathService {
 ```
 
 ### ConsistencyMode
+
 - `FAST`: 先创建容器，异步写 CRD
 - `STRONG`: 先写 CRD，后创建容器
 
 ### FailurePolicy
+
 - `MANUAL`: 仅报告状态，不自动恢复
 - `AUTO_RECREATE`: 故障时自动重新调度
 
@@ -181,17 +191,18 @@ go tool pprof -http=:8080 cpu.prof
 
 ## 开发计划
 
-- [x] **Phase 1**: 核心 Runtime (Containerd) 与 gRPC 框架
-- [x] **Phase 2**: Fast-Path API 与 Registry 调度
-- [x] **Phase 3**: CLI (`fsb-ctl`) 与交互式体验
-- [x] **Phase 4**: 日志流式传输与自动隧道
-- [x] **Phase 5**: 统一日志框架 (klog)
-- [x] **Phase 6**: 性能指标与单元测试
-- [ ] **Phase 7**: 容器热迁移 (Checkpoint/Restore)
-- [ ] **Phase 8**: Web 控制台与流量代理
-- [ ] **Phase 9**: gVisor 容器支持
-- [ ] **Phase 10**: CLI exec bash 与 Python SDK
-- [ ] **Phase 11**: GPU 容器支持
+- [X]  **Phase 1**: 核心 Runtime (Containerd) 与 gRPC 框架
+- [X]  **Phase 2**: Fast-Path API 与 Registry 调度
+- [X]  **Phase 3**: CLI (`fsb-ctl`) 与交互式体验
+- [X]  **Phase 4**: 日志流式传输与自动隧道
+- [X]  **Phase 5**: 统一日志框架 (klog)
+- [X]  **Phase 6**: 性能指标与单元测试
+- [ ]  phase 7: 支持自定义挂载 Volumes
+- [ ]  **Phase 8**: 容器热迁移 (Checkpoint/Restore)
+- [ ]  **Phase 9**: Web 控制台与流量代理
+- [ ]  **Phase 10**: gVisor 容器支持
+- [ ]  **Phase 11**: CLI exec bash 与 Python SDK
+- [ ]  **Phase 11**: GPU 容器支持
 
 ## 许可证
 

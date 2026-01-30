@@ -266,17 +266,3 @@ Fast Sandbox uses [klog](https://github.com/kubernetes/klog), the Kubernetes eco
 # CLI
 fsb-ctl -v=4 list
 ```
-
-## 7. Development Roadmap
-
-- [x] Phase 1: Core Runtime (Containerd) & gRPC framework
-- [x] Phase 2: Fast-Path API & Registry scheduling
-- [x] Phase 3: CLI (`fsb-ctl`) & interactive experience
-- [x] Phase 4: Log streaming & auto tunneling
-- [x] Phase 5: Unified logging (klog)
-- [x] Phase 6: Performance instrumentation & unit tests
-- [ ] Phase 7: Container checkpoint/restore (CRIU)
-- [ ] Phase 8: Web console & traffic proxy
-- [ ] Phase 9: gVisor support for secure sandboxing
-- [ ] Phase 10: CLI exec bash & Python SDK
-- [ ] Phase 11: GPU container support

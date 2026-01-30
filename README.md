@@ -187,11 +187,12 @@ See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for performance analysis.
 - [x] Phase 4: Log streaming & auto tunneling
 - [x] Phase 5: Unified logging (klog)
 - [x] Phase 6: Performance instrumentation & unit tests
-- [ ] Phase 7: Container checkpoint/restore (CRIU)
-- [ ] Phase 8: Web console & traffic proxy
-- [ ] Phase 9: gVisor support for secure sandboxing
-- [ ] Phase 10: CLI exec bash & Python SDK (Modal-like)
-- [ ] Phase 11: GPU container support
+- [ ] Phase 7: Supports custom volume mounting.
+- [ ] Phase 8: Container checkpoint/restore (CRIU)
+- [ ] Phase 9: Web console & traffic proxy
+- [ ] Phase 10: gVisor support for secure sandboxing
+- [ ] Phase 11: CLI exec bash & Python SDK (Modal-like)
+- [ ] Phase 12: GPU container support
 
 ## License
 
