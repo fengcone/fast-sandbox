@@ -127,15 +127,17 @@ func (s *Server) createFast(tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentI
 		return nil, err
 	}
 
-	klog.InfoS("Sandbox created on agent, setting allocation annotation", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPod", agent.PodName, "node", agent.NodeName)
+	klog.InfoS("Sandbox created on agent, setting label and annotations", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPod", agent.PodName, "node", agent.NodeName, "sandboxID", sandboxID)
 
-	// 设置 allocation annotation 和 createTimestamp，Controller 会搬运到 status 后删除
+	// 设置 label 标识 Fast 模式创建
+	tempSB.SetLabels(map[string]string{
+		common.LabelCreatedBy: common.CreatedByFastPathFast,
+	})
+	// 设置 annotations：allocation 和 createTimestamp（用于重新生成 sandboxID）
 	tempSB.SetAnnotations(map[string]string{
 		common.AnnotationAllocation:      common.BuildAllocationJSON(agent.PodName, agent.NodeName),
 		common.AnnotationCreateTimestamp: strconv.FormatInt(createTimestamp, 10),
 	})
-	// 设置 Status 中的 SandboxID
-	tempSB.Status.SandboxID = sandboxID
 
 	asyncCtx, _ := context.WithTimeout(context.Background(), 30*time.Second)
 	go s.asyncCreateCRDWithRetry(asyncCtx, tempSB)

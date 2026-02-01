@@ -6,9 +6,14 @@ import (
 )
 
 const (
+	// LabelCreatedBy 标识 sandbox 的创建方式
+	LabelCreatedBy = "sandbox.fast.io/created-by"
+	// CreatedByFastPathFast 标识由 FastPath Fast 模式创建
+	CreatedByFastPathFast = "fastpath-fast"
+
 	// AnnotationAllocation 临时存储 FastPath 的分配信息，Controller 会搬运到 status 后删除
 	AnnotationAllocation = "sandbox.fast.io/allocation"
-	// AnnotationCreateTimestamp 存储 Fast 模式创建时的时间戳，用于幂等性检查
+	// AnnotationCreateTimestamp 存储 Fast 模式创建时的时间戳，用于重新生成 sandboxID
 	AnnotationCreateTimestamp = "sandbox.fast.io/createTimestamp"
 )
 

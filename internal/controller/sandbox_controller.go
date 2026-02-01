@@ -3,12 +3,14 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
 	"fast-sandbox/internal/controller/common"
+	"fast-sandbox/pkg/util/idgen"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -104,13 +106,27 @@ func (r *SandboxReconciler) ensureFinalizer(ctx context.Context, sandbox *apiv1a
 }
 
 // getSandboxID returns the sandboxID to use when calling Agent API.
-// Prefers status.sandboxID if set, otherwise falls back to name (legacy).
+// Logic:
+// 1. If status.sandboxID is set, use it (Strong mode or already synced)
+// 2. If label "fastpath-fast" exists, regenerate from annotation timestamp
+// 3. Otherwise, fallback to UID (legacy/test sandboxes)
 func (r *SandboxReconciler) getSandboxID(sandbox *apiv1alpha1.Sandbox) string {
+	// 1. Status already has sandboxID (Strong mode or already synced)
 	if sandbox.Status.SandboxID != "" {
 		return sandbox.Status.SandboxID
 	}
-	// Legacy fallback for CRDs created before sandboxID was set
-	return sandbox.Name
+
+	// 2. Fast mode: regenerate from label + annotation
+	if sandbox.Labels[common.LabelCreatedBy] == common.CreatedByFastPathFast {
+		if tsStr, ok := sandbox.Annotations[common.AnnotationCreateTimestamp]; ok {
+			if timestamp, err := strconv.ParseInt(tsStr, 10, 64); err == nil {
+				return idgen.GenerateHashID(sandbox.Name, sandbox.Namespace, timestamp)
+			}
+		}
+	}
+
+	// 3. Legacy fallback for CRDs created before this feature
+	return string(sandbox.UID)
 }
 
 // ============================================================================
@@ -218,7 +234,7 @@ func (r *SandboxReconciler) handleTerminatingDeletion(ctx context.Context, sandb
 	}
 
 	// Check Agent-reported status
-	agentStatus, hasStatus := agent.SandboxStatuses[sandbox.Name]
+	agentStatus, hasStatus := agent.SandboxStatuses[r.getSandboxID(sandbox)]
 	logger.Info("[DEBUG-TERM] Agent status check",
 		"hasStatus", hasStatus,
 		"phase", func() string {

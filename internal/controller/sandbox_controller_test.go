@@ -240,6 +240,12 @@ func withExposedPorts(ports ...int32) func(*apiv1alpha1.Sandbox) {
 	}
 }
 
+func withUID(uid string) func(*apiv1alpha1.Sandbox) {
+	return func(sb *apiv1alpha1.Sandbox) {
+		sb.UID = types.UID(uid)
+	}
+}
+
 func reconcileRequest(name string) ctrl.Request {
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: name},
@@ -340,7 +346,8 @@ func TestSandbox_Creation_AddFinalizer(t *testing.T) {
 func TestSandbox_Creation_AgentCreateSuccess(t *testing.T) {
 	// C-05: Phase=Pending，调用 Agent.CreateSandbox 成功
 	scheme := newTestScheme(t)
-	sb := newBaseSandbox("test-sb", withFinalizer, withAssignedPod("test-agent"), withPhase("Pending"))
+	testUID := "test-uid-001"
+	sb := newBaseSandbox("test-sb", withFinalizer, withAssignedPod("test-agent"), withPhase("Pending"), withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -356,7 +363,7 @@ func TestSandbox_Creation_AgentCreateSuccess(t *testing.T) {
 		CreateSandboxFunc: func(agentIP string, req *api.CreateSandboxRequest) (*api.CreateSandboxResponse, error) {
 			createCalled = true
 			assert.Equal(t, "10.0.0.1", agentIP)
-			assert.Equal(t, "test-sb", req.Sandbox.SandboxID)
+			assert.Equal(t, testUID, req.Sandbox.SandboxID)
 			return &api.CreateSandboxResponse{}, nil
 		},
 	}
@@ -403,14 +410,15 @@ func TestSandbox_Creation_AgentCreateFailure(t *testing.T) {
 func TestSandbox_Deletion_BoundPhase(t *testing.T) {
 	// D-01: DeletionTimestamp 设置，Phase=Bound，调用 Agent 删除
 	scheme := newTestScheme(t)
-	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Bound"))
+	testUID := "test-uid-002"
+	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Bound"), withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	deleteCalled := false
 	agentClient := &MockAgentClient{
 		DeleteSandboxFunc: func(agentIP string, req *api.DeleteSandboxRequest) (*api.DeleteSandboxResponse, error) {
 			deleteCalled = true
-			assert.Equal(t, "test-sb", req.SandboxID)
+			assert.Equal(t, testUID, req.SandboxID)
 			return &api.DeleteSandboxResponse{Success: true}, nil
 		},
 	}
@@ -457,7 +465,8 @@ func TestSandbox_Deletion_WaitForTerminated(t *testing.T) {
 func TestSandbox_Deletion_TerminatingWaiting(t *testing.T) {
 	// D-03: Phase=Terminating，Agent 还在上报该 sandbox (还在删除中)
 	scheme := newTestScheme(t)
-	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"))
+	testUID := "test-uid-003"
+	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"), withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -466,7 +475,7 @@ func TestSandbox_Deletion_TerminatingWaiting(t *testing.T) {
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(),
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "running"}, // Agent 还在上报 sandbox
+			testUID: {SandboxID: testUID, Phase: "running"}, // Agent 还在上报 sandbox
 		},
 	}
 	agentClient := &MockAgentClient{}
@@ -484,7 +493,8 @@ func TestSandbox_Deletion_AgentReportsTerminated(t *testing.T) {
 	// 新行为：只有 Agent 不再上报该 sandbox 时才算删除完成
 	// 即 phase="terminated" 时仍需等待
 	scheme := newTestScheme(t)
-	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"))
+	testUID := "test-uid-004"
+	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"), withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -493,7 +503,7 @@ func TestSandbox_Deletion_AgentReportsTerminated(t *testing.T) {
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(),
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "terminated"}, // Agent 上报 terminated，但仍需等待直到不再上报
+			testUID: {SandboxID: testUID, Phase: "terminated"}, // Agent 上报 terminated，但仍需等待直到不再上报
 		},
 	}
 	agentClient := &MockAgentClient{}
@@ -880,9 +890,11 @@ func TestSandbox_FailurePolicy_Manual(t *testing.T) {
 func TestSandbox_HeartbeatNormal(t *testing.T) {
 	// F-05: 心跳正常 (LastHeartbeat < 10s)
 	scheme := newTestScheme(t)
+	testUID := "test-uid-005"
 	sb := newBaseSandbox("test-sb", withFinalizer,
 		withAssignedPod("test-agent"),
-		withPhase("Bound"))
+		withPhase("Bound"),
+		withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -891,7 +903,7 @@ func TestSandbox_HeartbeatNormal(t *testing.T) {
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(), // 刚刚心跳
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "running", SandboxID: "sb-123"},
+			testUID: {SandboxID: testUID, Phase: "running"},
 		},
 	}
 	agentClient := &MockAgentClient{}
@@ -905,7 +917,7 @@ func TestSandbox_HeartbeatNormal(t *testing.T) {
 	// 应该同步 Agent 状态到 CRD
 	updated := getSandbox(t, r, "test-sb")
 	assert.Equal(t, "Running", updated.Status.Phase)
-	assert.Equal(t, "sb-123", updated.Status.SandboxID)
+	assert.Equal(t, testUID, updated.Status.SandboxID)
 }
 
 func TestSandbox_HeartbeatTimeout(t *testing.T) {
@@ -933,9 +945,11 @@ func TestSandbox_HeartbeatTimeout(t *testing.T) {
 func TestSandbox_StatusSync_FromRegistry(t *testing.T) {
 	// S-01: 同步 Agent 状态
 	scheme := newTestScheme(t)
+	testUID := "container-abc123"
 	sb := newBaseSandbox("test-sb", withFinalizer,
 		withAssignedPod("test-agent"),
-		withPhase("Bound"))
+		withPhase("Bound"),
+		withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -944,7 +958,7 @@ func TestSandbox_StatusSync_FromRegistry(t *testing.T) {
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(),
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "running", SandboxID: "container-abc123"},
+			testUID: {SandboxID: testUID, Phase: "running"},
 		},
 	}
 	agentClient := &MockAgentClient{}
@@ -956,16 +970,18 @@ func TestSandbox_StatusSync_FromRegistry(t *testing.T) {
 
 	updated := getSandbox(t, r, "test-sb")
 	assert.Equal(t, "Running", updated.Status.Phase)
-	assert.Equal(t, "container-abc123", updated.Status.SandboxID)
+	assert.Equal(t, testUID, updated.Status.SandboxID)
 }
 
 func TestSandbox_StatusSync_Endpoints(t *testing.T) {
 	// S-02: 端口填充
 	scheme := newTestScheme(t)
+	testUID := "test-uid-006"
 	sb := newBaseSandbox("test-sb", withFinalizer,
 		withAssignedPod("test-agent"),
 		withPhase("Bound"),
-		withExposedPorts(8080, 9090))
+		withExposedPorts(8080, 9090),
+		withUID(testUID))
 
 	registry := NewConfigurableMockRegistry()
 	registry.DefaultAgent = &agentpool.AgentInfo{
@@ -974,7 +990,7 @@ func TestSandbox_StatusSync_Endpoints(t *testing.T) {
 		PodIP:         "10.0.0.99",
 		LastHeartbeat: time.Now(),
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "running", SandboxID: "sb-xyz"},
+			testUID: {SandboxID: testUID, Phase: "running"},
 		},
 	}
 	agentClient := &MockAgentClient{}
