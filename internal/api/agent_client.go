@@ -54,7 +54,7 @@ func (c *AgentClient) CreateSandbox(agentIP string, req *CreateSandboxRequest) (
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		klog.V(2).InfoS("Agent CreateSandbox RPC",
+		klog.InfoS("Agent CreateSandbox RPC",
 			"endpoint", agentIP,
 			"sandboxID", req.Sandbox.SandboxID,
 			"duration_ms", duration.Milliseconds())
@@ -100,7 +100,7 @@ func (c *AgentClient) DeleteSandbox(agentIP string, req *DeleteSandboxRequest) (
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		klog.V(2).InfoS("Agent DeleteSandbox RPC",
+		klog.InfoS("Agent DeleteSandbox RPC",
 			"endpoint", agentIP,
 			"sandboxID", req.SandboxID,
 			"duration_ms", duration.Milliseconds())

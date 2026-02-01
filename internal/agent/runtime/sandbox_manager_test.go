@@ -354,7 +354,7 @@ func TestSandboxManager_CreateSandbox_Idempotent(t *testing.T) {
 }
 
 func TestSandboxManager_CreateSandbox_RuntimeFailure(t *testing.T) {
-	// CS-03: Runtime failure triggers async cleanup and returns error
+	// CS-03: Runtime failure returns error (runtime handles its own cleanup)
 	mockRuntime := NewMockRuntime()
 	manager := NewSandboxManager(mockRuntime)
 
@@ -377,11 +377,15 @@ func TestSandboxManager_CreateSandbox_RuntimeFailure(t *testing.T) {
 	assert.Contains(t, resp.Message, "create failed", "Error message should contain details")
 	assert.Equal(t, expectedErr, err, "Returned error should match runtime error")
 
-	// Wait for async cleanup to complete
+	// Wait for any potential async cleanup
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify cleanup was attempted
-	assert.True(t, mockRuntime.GetDeleteCalled(), "Async cleanup should call DeleteSandbox")
+	// Verify sandbox was not added to the manager's cache
+	statuses := manager.GetSandboxStatuses(ctx)
+	assert.Empty(t, statuses, "Failed sandbox should not be in cache")
+
+	// Note: The runtime is responsible for its own cleanup on create failure,
+	// the manager doesn't call asyncDelete to avoid race conditions
 }
 
 func TestSandboxManager_CreateSandbox_MultipleSandboxes(t *testing.T) {
@@ -472,10 +476,9 @@ func TestSandboxManager_DeleteSandbox_Success(t *testing.T) {
 	// Wait for async deletion to complete
 	time.Sleep(100 * time.Millisecond)
 
-	// Sandbox should be moved to terminated
+	// Sandbox should be completely removed (direct deletion)
 	statuses = manager.GetSandboxStatuses(ctx)
-	require.Len(t, statuses, 1, "Should still have one status")
-	assert.Equal(t, "terminated", statuses[0].Phase, "Phase should be terminated after async delete")
+	assert.Empty(t, statuses, "Sandbox should be completely removed after async delete")
 }
 
 func TestSandboxManager_DeleteSandbox_Idempotent(t *testing.T) {
@@ -559,10 +562,9 @@ func TestSandboxManager_DeleteSandbox_MultipleDeletes(t *testing.T) {
 	// Wait for async delete to complete
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify sandbox was moved to terminated
+	// Verify sandbox was completely removed (direct deletion)
 	statuses := manager.GetSandboxStatuses(ctx)
-	require.Len(t, statuses, 1)
-	assert.Equal(t, "terminated", statuses[0].Phase)
+	assert.Empty(t, statuses, "Sandbox should be completely removed after async delete")
 }
 
 // ============================================================================
@@ -570,7 +572,7 @@ func TestSandboxManager_DeleteSandbox_MultipleDeletes(t *testing.T) {
 // ============================================================================
 
 func TestSandboxManager_GetSandboxStatuses(t *testing.T) {
-	// GS-01: Returns statuses for active and terminated sandboxes
+	// GS-01: Returns statuses for active sandboxes only (deleted ones are completely removed)
 	mockRuntime := NewMockRuntime()
 	manager := NewSandboxManager(mockRuntime)
 
@@ -595,7 +597,7 @@ func TestSandboxManager_GetSandboxStatuses(t *testing.T) {
 	_, err = manager.CreateSandbox(ctx, spec2)
 	require.NoError(t, err)
 
-	// Delete one sandbox (it will be in terminated state after async cleanup)
+	// Delete one sandbox
 	_, err = manager.DeleteSandbox(spec1.SandboxID)
 	require.NoError(t, err)
 
@@ -605,23 +607,12 @@ func TestSandboxManager_GetSandboxStatuses(t *testing.T) {
 	// Get statuses
 	statuses := manager.GetSandboxStatuses(ctx)
 
-	// Should have both active and terminated sandboxes
-	require.Len(t, statuses, 2, "Should have two statuses")
-
-	// Create a map for easier lookup
-	statusMap := make(map[string]api.SandboxStatus)
-	for _, status := range statuses {
-		statusMap[status.SandboxID] = status
-	}
-
-	// Check deleted sandbox is terminated
-	terminatedStatus, exists := statusMap[spec1.SandboxID]
-	assert.True(t, exists, "Deleted sandbox should be in statuses")
-	assert.Equal(t, "terminated", terminatedStatus.Phase, "Deleted sandbox should be terminated")
+	// Should have only the active sandbox (deleted one is completely removed)
+	require.Len(t, statuses, 1, "Should have one status (only active)")
 
 	// Check active sandbox is still running
-	activeStatus, exists := statusMap[spec2.SandboxID]
-	assert.True(t, exists, "Active sandbox should be in statuses")
+	activeStatus := statuses[0]
+	assert.Equal(t, spec2.SandboxID, activeStatus.SandboxID)
 	assert.Equal(t, "running", activeStatus.Phase, "Active sandbox should be running")
 	assert.Equal(t, spec2.ClaimUID, activeStatus.ClaimUID)
 }
@@ -692,7 +683,6 @@ func TestSandboxManager_GetSandboxStatuses_MultiplePhases(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	statuses := manager.GetSandboxStatuses(ctx)
-	require.Len(t, statuses, 3)
 
 	// Create a map for easier lookup
 	statusMap := make(map[string]api.SandboxStatus)
@@ -700,10 +690,10 @@ func TestSandboxManager_GetSandboxStatuses_MultiplePhases(t *testing.T) {
 		statusMap[status.SandboxID] = status
 	}
 
-	// First sandbox should be terminated or terminating
-	firstStatus := statusMap[specs[0].SandboxID]
-	assert.True(t, firstStatus.Phase == "terminated" || firstStatus.Phase == "terminating",
-		"First sandbox should be terminating or terminated")
+	// First sandbox might be terminating or gone (async may have completed)
+	if firstStatus, exists := statusMap[specs[0].SandboxID]; exists {
+		assert.Equal(t, "terminating", firstStatus.Phase, "First sandbox should be terminating if still present")
+	}
 
 	// Other sandboxes should be running
 	for i := 1; i < 3; i++ {
@@ -851,10 +841,9 @@ func TestSandboxManager_AsyncDelete_Timeout(t *testing.T) {
 	// Wait for async delete to complete (should complete within timeout)
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify sandbox was moved to terminated
+	// Verify sandbox was completely removed (direct deletion)
 	statuses := manager.GetSandboxStatuses(ctx)
-	require.Len(t, statuses, 1)
-	assert.Equal(t, "terminated", statuses[0].Phase)
+	assert.Empty(t, statuses, "Sandbox should be completely removed after async delete")
 }
 
 func TestSandboxManager_AsyncDelete_RuntimeError(t *testing.T) {
@@ -885,8 +874,7 @@ func TestSandboxManager_AsyncDelete_RuntimeError(t *testing.T) {
 	// Wait for async delete
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify sandbox was still moved to terminated despite error
+	// Verify sandbox was completely removed even with runtime error
 	statuses := manager.GetSandboxStatuses(ctx)
-	require.Len(t, statuses, 1)
-	assert.Equal(t, "terminated", statuses[0].Phase, "Sandbox should be terminated even with runtime error")
+	assert.Empty(t, statuses, "Sandbox should be completely removed even with runtime error")
 }

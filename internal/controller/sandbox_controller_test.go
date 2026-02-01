@@ -428,7 +428,7 @@ func TestSandbox_Deletion_BoundPhase(t *testing.T) {
 }
 
 func TestSandbox_Deletion_WaitForTerminated(t *testing.T) {
-	// D-02: Phase=Terminating，Agent 上报 terminated
+	// D-02: Phase=Terminating，Agent 不再上报该 sandbox (已删除完成)
 	scheme := newTestScheme(t)
 	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"))
 
@@ -438,9 +438,8 @@ func TestSandbox_Deletion_WaitForTerminated(t *testing.T) {
 		PodName:       "test-agent",
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(),
-		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "terminated"},
-		},
+		// SandboxStatuses 中没有 "test-sb" = Agent 已删除该 sandbox
+		SandboxStatuses: map[string]api.SandboxStatus{},
 	}
 	agentClient := &MockAgentClient{}
 
@@ -456,7 +455,7 @@ func TestSandbox_Deletion_WaitForTerminated(t *testing.T) {
 }
 
 func TestSandbox_Deletion_TerminatingWaiting(t *testing.T) {
-	// D-03: Phase=Terminating，Agent 未上报 terminated
+	// D-03: Phase=Terminating，Agent 还在上报该 sandbox (还在删除中)
 	scheme := newTestScheme(t)
 	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"))
 
@@ -467,7 +466,7 @@ func TestSandbox_Deletion_TerminatingWaiting(t *testing.T) {
 		PodIP:         "10.0.0.1",
 		LastHeartbeat: time.Now(),
 		SandboxStatuses: map[string]api.SandboxStatus{
-			"test-sb": {Phase: "running"}, // 还没有 terminated
+			"test-sb": {Phase: "running"}, // Agent 还在上报 sandbox
 		},
 	}
 	agentClient := &MockAgentClient{}
@@ -477,6 +476,33 @@ func TestSandbox_Deletion_TerminatingWaiting(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), reconcileRequest("test-sb"))
 	require.NoError(t, err)
 	assert.Equal(t, 2*time.Second, result.RequeueAfter, "应该继续等待")
+	assert.False(t, registry.ReleaseCalled, "不应该释放 Registry")
+}
+
+func TestSandbox_Deletion_AgentReportsTerminated(t *testing.T) {
+	// D-03b: Phase=Terminating，Agent 上报 phase="terminated"
+	// 新行为：只有 Agent 不再上报该 sandbox 时才算删除完成
+	// 即 phase="terminated" 时仍需等待
+	scheme := newTestScheme(t)
+	sb := newBaseSandbox("test-sb", withFinalizer, withDeletionTimestamp, withAssignedPod("test-agent"), withPhase("Terminating"))
+
+	registry := NewConfigurableMockRegistry()
+	registry.DefaultAgent = &agentpool.AgentInfo{
+		ID:            "test-agent",
+		PodName:       "test-agent",
+		PodIP:         "10.0.0.1",
+		LastHeartbeat: time.Now(),
+		SandboxStatuses: map[string]api.SandboxStatus{
+			"test-sb": {Phase: "terminated"}, // Agent 上报 terminated，但仍需等待直到不再上报
+		},
+	}
+	agentClient := &MockAgentClient{}
+
+	r := newTestReconciler(scheme, []client.Object{sb}, registry, agentClient)
+
+	result, err := r.Reconcile(context.Background(), reconcileRequest("test-sb"))
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Second, result.RequeueAfter, "应该继续等待，直到 Agent 不再上报该 sandbox")
 	assert.False(t, registry.ReleaseCalled, "不应该释放 Registry")
 }
 

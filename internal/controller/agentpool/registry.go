@@ -297,7 +297,7 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 	selectDuration := time.Since(selectStart)
 	totalDuration := time.Since(totalStart)
 
-	klog.V(2).InfoS("Registry Allocate timing",
+	klog.InfoS("Registry Allocate timing",
 		"sandbox", sb.Name,
 		"total_ms", totalDuration.Milliseconds(),
 		"candidate_ms", candidateDuration.Milliseconds(),
@@ -305,23 +305,37 @@ func (r *InMemoryRegistry) Allocate(sb *apiv1alpha1.Sandbox) (*AgentInfo, error)
 		"select_ms", selectDuration.Milliseconds(),
 		"selectedAgent", info.ID,
 		"imageHit", imageHit,
-		"agentCount", len(candidates))
+		"agentCount", len(candidates),
+		"bestSlot.info.Allocated", bestSlot.info.Allocated)
 
 	res := bestSlot.info
 	return &res, nil
 }
 
 func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
+	klog.Info("[DEBUG-REGISTRY] Release ENTER",
+		"agentID", id,
+		"sandbox", sb.Name,
+		"ports", sb.Spec.ExposedPorts)
+
 	r.mu.RLock()
 	slot, ok := r.agents[id]
 	r.mu.RUnlock()
 
 	if !ok {
+		klog.Warning("[DEBUG-REGISTRY] Release: slot not found for agent",
+			"agentID", id,
+			"impact", "Allocated will NOT decrease!")
 		return
 	}
 
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
+
+	klog.Info("[DEBUG-REGISTRY] Release: slot state BEFORE",
+		"allocated", slot.info.Allocated,
+		"sandboxInStatuses", slot.info.SandboxStatuses[sb.Name],
+		"usedPorts", slot.info.UsedPorts)
 
 	// Always release allocated slot - sandbox may have already been removed from
 	// SandboxStatuses due to async deletion or heartbeat sync delay.
@@ -329,14 +343,28 @@ func (r *InMemoryRegistry) Release(id AgentID, sb *apiv1alpha1.Sandbox) {
 	// allocated count, only whether this specific sandbox was counting against capacity.
 	if _, exists := slot.info.SandboxStatuses[sb.Name]; exists {
 		delete(slot.info.SandboxStatuses, sb.Name)
+		klog.Info("[DEBUG-REGISTRY] Release: removed sandbox from SandboxStatuses")
+	} else {
+		klog.Info("[DEBUG-REGISTRY] Release: sandbox NOT in SandboxStatuses",
+			"this", "is expected if already removed by heartbeat")
 	}
 
 	if slot.info.Allocated > 0 {
 		slot.info.Allocated--
+		klog.Info("[DEBUG-REGISTRY] Release: DECREASED Allocated",
+			"allocatedAfter", slot.info.Allocated)
+	} else {
+		klog.Warning("[DEBUG-REGISTRY] Release: Allocated is already 0!",
+			"this", "indicates double-free or accounting bug")
 	}
+
 	for _, p := range sb.Spec.ExposedPorts {
 		delete(slot.info.UsedPorts, p)
 	}
+
+	klog.Info("[DEBUG-REGISTRY] Release: slot state AFTER",
+		"allocated", slot.info.Allocated,
+		"usedPorts", slot.info.UsedPorts)
 }
 
 func (r *InMemoryRegistry) Restore(ctx context.Context, c client.Reader) error {

@@ -125,6 +125,9 @@ func main() {
 
 	klog.InfoS("starting manager")
 
+	// Set up controller-runtime logging to use klog
+	ctrl.SetLogger(klog.NewKlogr())
+
 	go func() {
 		klog.InfoS("Starting pprof server", "address", ":6060")
 		klog.ErrorS(http.ListenAndServe("localhost:6060", nil), "pprof server exited")

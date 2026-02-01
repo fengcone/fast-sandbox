@@ -8,6 +8,7 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
+	"fast-sandbox/internal/controller/common"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -109,6 +110,7 @@ func (r *SandboxReconciler) ensureFinalizer(ctx context.Context, sandbox *apiv1a
 // handleDeletion processes the Sandbox deletion workflow.
 // State transitions: Bound/Running → Terminating → (Agent confirms) → Removed
 func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
+	klog.Info("[SIMPLE-LOG] handleDeletion called for sandbox", "sandbox", sandbox.Name)
 	logger := klog.FromContext(ctx)
 
 	if !controllerutil.ContainsFinalizer(sandbox, FinalizerName) {
@@ -142,18 +144,29 @@ func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *apiv1al
 func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
 	logger := klog.FromContext(ctx)
 
+	logger.Info("[DEBUG-ACTIVE-DEL] handleActiveDeletion ENTER",
+		"sandbox", sandbox.Name,
+		"assignedPod", sandbox.Status.AssignedPod,
+		"phase", sandbox.Status.Phase)
+
 	// Check if Agent exists
 	if sandbox.Status.AssignedPod == "" {
-		logger.V(1).Info("No assigned pod, removing finalizer directly")
+		logger.Info("[DEBUG-ACTIVE-DEL] No assigned pod, removing finalizer directly")
 		return r.removeFinalizer(ctx, sandbox)
 	}
 
 	_, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
 	if !agentExists {
-		// Agent doesn't exist - skip Agent cleanup, just remove finalizer
-		logger.Info("Agent not found in registry, removing finalizer", "agent", sandbox.Status.AssignedPod)
+		// Agent doesn't exist - still try to release the allocated slot
+		// This fixes the bug where Allocated was never decreased when Agent disappeared
+		logger.Info("[BUG-FIX] Agent not found in registry during active deletion - attempting Release to free Allocated slot",
+			"agent", sandbox.Status.AssignedPod)
+		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
 		return r.removeFinalizer(ctx, sandbox)
 	}
+
+	logger.Info("[DEBUG-ACTIVE-DEL] Agent exists, calling deleteFromAgent",
+		"agentID", agentpool.AgentID(sandbox.Status.AssignedPod))
 
 	// Call Agent to delete the sandbox
 	if err := r.deleteFromAgent(ctx, sandbox); err != nil {
@@ -165,7 +178,7 @@ func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *a
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Sandbox deletion initiated, transitioning to Terminating")
+	logger.Info("[DEBUG-ACTIVE-DEL] Transitioning to Terminating, will requeue after", "seconds", DeletionPollInterval)
 	return ctrl.Result{RequeueAfter: DeletionPollInterval}, nil
 }
 
@@ -173,25 +186,53 @@ func (r *SandboxReconciler) handleActiveDeletion(ctx context.Context, sandbox *a
 func (r *SandboxReconciler) handleTerminatingDeletion(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
 	logger := klog.FromContext(ctx)
 
+	logger.Info("[DEBUG-TERM] handleTerminatingDeletion ENTER",
+		"sandbox", sandbox.Name,
+		"assignedPod", sandbox.Status.AssignedPod,
+		"deletionTimestamp", sandbox.DeletionTimestamp)
+
 	// Check if Agent still exists
 	agent, agentExists := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
+	logger.Info("[DEBUG-TERM] Agent existence check",
+		"agentID", agentpool.AgentID(sandbox.Status.AssignedPod),
+		"agentExists", agentExists)
+
 	if !agentExists {
-		// Agent gone - assume cleanup is complete
-		logger.Info("Agent disappeared during termination, completing cleanup")
+		// Agent gone - still try to release in case the slot still exists
+		// The Release function handles the case where the slot doesn't exist (no-op)
+		// This fixes the bug where Allocated was never decreased when Agent disappeared
+		logger.Info("[BUG-FIX] Agent disappeared during termination - attempting Release to free Allocated slot",
+			"agentID", agentpool.AgentID(sandbox.Status.AssignedPod))
+		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
 		return r.removeFinalizer(ctx, sandbox)
 	}
 
 	// Check Agent-reported status
 	agentStatus, hasStatus := agent.SandboxStatuses[sandbox.Name]
-	if hasStatus && apiv1alpha1.AgentSandboxPhase(agentStatus.Phase) == apiv1alpha1.AgentPhaseTerminated {
-		// Agent confirmed deletion - release resources and remove finalizer
-		logger.Info("Agent confirmed sandbox terminated")
+	logger.Info("[DEBUG-TERM] Agent status check",
+		"hasStatus", hasStatus,
+		"phase", func() string {
+			if hasStatus {
+				return agentStatus.Phase
+			} else {
+				return "<none>"
+			}
+		}(),
+		"agentAllocated", agent.Allocated)
+
+	if !hasStatus {
+		// Agent no longer reports this sandbox = deletion confirmed
+		// Release resources and remove finalizer
+		logger.Info("[DEBUG-TERM] Agent no longer reports sandbox - deletion confirmed, calling Registry.Release",
+			"agentAllocatedBefore", agent.Allocated)
 		r.Registry.Release(agentpool.AgentID(sandbox.Status.AssignedPod), sandbox)
 		return r.removeFinalizer(ctx, sandbox)
 	}
 
 	// Still terminating - continue waiting
-	logger.V(1).Info("Waiting for Agent to confirm termination")
+	logger.Info("[DEBUG-TERM] Still waiting for Agent termination",
+		"currentPhase", agentStatus.Phase,
+		"willRequeueAfter", DeletionPollInterval)
 	return ctrl.Result{RequeueAfter: DeletionPollInterval}, nil
 }
 
@@ -358,6 +399,27 @@ func (r *SandboxReconciler) reconcilePhase(ctx context.Context, sandbox *apiv1al
 func (r *SandboxReconciler) reconcilePending(ctx context.Context, sandbox *apiv1alpha1.Sandbox) (ctrl.Result, error) {
 	logger := klog.FromContext(ctx)
 
+	// === Step 0: 搬运 allocation annotation 到 status ===
+	allocInfo, err := common.ParseAllocationInfo(sandbox.Annotations)
+	if err != nil {
+		logger.Error(err, "Failed to parse allocation annotation, clearing it")
+		r.clearAllocationAnnotation(ctx, sandbox)
+		return ctrl.Result{Requeue: true}, nil
+	}
+	if allocInfo != nil {
+		logger.Info("Found allocation annotation from FastPath, moving to status",
+			"assignedPod", allocInfo.AssignedPod, "assignedNode", allocInfo.AssignedNode)
+
+		if err := r.moveAllocationToStatus(ctx, sandbox, allocInfo); err != nil {
+			logger.Error(err, "Failed to move allocation to status")
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("Allocation moved to status, annotation cleared, requeueing")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// === 原有逻辑保持不变 ===
 	// Step 1: Scheduling (if not yet assigned)
 	if sandbox.Status.AssignedPod == "" {
 		return r.handleScheduling(ctx, sandbox)
@@ -572,18 +634,31 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 
 // deleteFromAgent sends a delete request to the Agent.
 func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox) error {
+	klog.Info("[DEBUG-DELETE-FROM-AGENT] ENTER",
+		"sandbox", sandbox.Name,
+		"assignedPod", sandbox.Status.AssignedPod)
+
 	agent, ok := r.Registry.GetAgentByID(agentpool.AgentID(sandbox.Status.AssignedPod))
 	if !ok {
 		// Agent not found - nothing to delete
+		klog.Warning("[DEBUG-DELETE-FROM-AGENT] Agent not found in registry",
+			"agentID", agentpool.AgentID(sandbox.Status.AssignedPod))
 		return nil
 	}
+
+	klog.Info("[DEBUG-DELETE-FROM-AGENT] Calling Agent DeleteSandbox API",
+		"agentPodIP", agent.PodIP,
+		"sandboxID", sandbox.Name)
 
 	_, err := r.AgentClient.DeleteSandbox(agent.PodIP, &api.DeleteSandboxRequest{
 		SandboxID: sandbox.Name,
 	})
 	if err != nil {
+		klog.Error("[DEBUG-DELETE-FROM-AGENT] DeleteSandbox API failed", "err", err)
 		return fmt.Errorf("failed to delete sandbox from agent %s: %w", agent.PodIP, err)
 	}
+
+	klog.Info("[DEBUG-DELETE-FROM-AGENT] DeleteSandbox API called successfully")
 	return nil
 }
 
@@ -668,6 +743,35 @@ func envVarToMap(envs []corev1.EnvVar) map[string]string {
 		result[e.Name] = e.Value
 	}
 	return result
+}
+
+// moveAllocationToStatus 搬运 annotation 到 status，然后删除 annotation
+func (r *SandboxReconciler) moveAllocationToStatus(ctx context.Context, sandbox *apiv1alpha1.Sandbox, allocInfo *common.AllocationInfo) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+
+		latest.Status.AssignedPod = allocInfo.AssignedPod
+		latest.Status.NodeName = allocInfo.AssignedNode
+		latest.Status.Phase = string(apiv1alpha1.PhaseBound)
+		return r.Status().Update(ctx, latest)
+	})
+}
+
+// clearAllocationAnnotation 清除损坏的 annotation
+func (r *SandboxReconciler) clearAllocationAnnotation(ctx context.Context, sandbox *apiv1alpha1.Sandbox) {
+	retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &apiv1alpha1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
+		if latest.Annotations != nil {
+			delete(latest.Annotations, common.AnnotationAllocation)
+		}
+		return r.Update(ctx, latest)
+	})
 }
 
 // ============================================================================

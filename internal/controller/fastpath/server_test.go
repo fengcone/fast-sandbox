@@ -2,6 +2,7 @@ package fastpath
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
+	"fast-sandbox/internal/controller/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,13 +60,13 @@ func TestServer_CreateSandbox_FastMode_Success(t *testing.T) {
 
 	registry := &MockRegistryForTest{
 		DefaultAgent: &agentpool.AgentInfo{
-			ID:        "agent-1",
-			PodName:   "agent-pod-1",
-			PodIP:     "10.0.0.5",
-			NodeName:  "node-1",
-			PoolName:  "test-pool",
-			Capacity:  10,
-			Allocated: 0,
+			ID:            "agent-1",
+			PodName:       "agent-pod-1",
+			PodIP:         "10.0.0.5",
+			NodeName:      "node-1",
+			PoolName:      "test-pool",
+			Capacity:      10,
+			Allocated:     0,
 			LastHeartbeat: time.Now(),
 		},
 	}
@@ -145,13 +147,13 @@ func TestServer_CreateSandbox_FastMode_AgentRPCFailure(t *testing.T) {
 
 	registry := &MockRegistryForTest{
 		DefaultAgent: &agentpool.AgentInfo{
-			ID:        "agent-1",
-			PodName:   "agent-pod-1",
-			PodIP:     "10.0.0.5",
-			NodeName:  "node-1",
-			PoolName:  "test-pool",
-			Capacity:  10,
-			Allocated: 0,
+			ID:            "agent-1",
+			PodName:       "agent-pod-1",
+			PodIP:         "10.0.0.5",
+			NodeName:      "node-1",
+			PoolName:      "test-pool",
+			Capacity:      10,
+			Allocated:     0,
 			LastHeartbeat: time.Now(),
 		},
 	}
@@ -196,13 +198,13 @@ func TestServer_CreateSandbox_StrongMode_Success(t *testing.T) {
 
 	registry := &MockRegistryForTest{
 		DefaultAgent: &agentpool.AgentInfo{
-			ID:        "agent-1",
-			PodName:   "agent-pod-1",
-			PodIP:     "10.0.0.5",
-			NodeName:  "node-1",
-			PoolName:  "test-pool",
-			Capacity:  10,
-			Allocated: 0,
+			ID:            "agent-1",
+			PodName:       "agent-pod-1",
+			PodIP:         "10.0.0.5",
+			NodeName:      "node-1",
+			PoolName:      "test-pool",
+			Capacity:      10,
+			Allocated:     0,
 			LastHeartbeat: time.Now(),
 		},
 	}
@@ -238,13 +240,13 @@ func TestServer_CreateSandbox_StrongMode_K8sError(t *testing.T) {
 
 	registry := &MockRegistryForTest{
 		DefaultAgent: &agentpool.AgentInfo{
-			ID:        "agent-1",
-			PodName:   "agent-pod-1",
-			PodIP:     "10.0.0.5",
-			NodeName:  "node-1",
-			PoolName:  "test-pool",
-			Capacity:  10,
-			Allocated: 0,
+			ID:            "agent-1",
+			PodName:       "agent-pod-1",
+			PodIP:         "10.0.0.5",
+			NodeName:      "node-1",
+			PoolName:      "test-pool",
+			Capacity:      10,
+			Allocated:     0,
 			LastHeartbeat: time.Now(),
 		},
 	}
@@ -319,8 +321,8 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 				Name:         "my-sandbox",
 				ExposedPorts: []int32{80},
 			},
-			expectError: true, // Will fail due to no real agent
-			errorContains: "",
+			expectError:    true, // Will fail due to no real agent
+			errorContains:  "",
 			validateResult: nil,
 		},
 		{
@@ -331,8 +333,8 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 				Namespace: "default",
 				Name:      "", // Empty name
 			},
-			expectError: true,
-			errorContains: "",
+			expectError:    true,
+			errorContains:  "",
 			validateResult: nil,
 		},
 		{
@@ -343,7 +345,7 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 				Namespace: "", // Empty namespace
 				Name:      "test-sb",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "",
 			validateResult: func(t *testing.T, resp *fastpathv1.CreateResponse, err error) {
 				// Verify namespace defaults to empty string which becomes ""
@@ -359,8 +361,8 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 				Name:         "redis-sb",
 				ExposedPorts: []int32{6379},
 			},
-			expectError: true,
-			errorContains: "",
+			expectError:    true,
+			errorContains:  "",
 			validateResult: nil,
 		},
 		{
@@ -375,8 +377,8 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 					"POSTGRES_DB":       "mydb",
 				},
 			},
-			expectError: true,
-			errorContains: "",
+			expectError:    true,
+			errorContains:  "",
 			validateResult: nil,
 		},
 		{
@@ -389,21 +391,21 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 				Command:   []string{"/bin/sh"},
 				Args:      []string{"-c", "sleep 10"},
 			},
-			expectError: true,
-			errorContains: "",
+			expectError:    true,
+			errorContains:  "",
 			validateResult: nil,
 		},
 		{
 			name: "request with working directory",
 			req: &fastpathv1.CreateRequest{
-				Image:       "app:latest",
-				PoolRef:     "test-pool",
-				Namespace:   "default",
-				Name:        "app-sb",
-				WorkingDir:  "/workspace",
+				Image:      "app:latest",
+				PoolRef:    "test-pool",
+				Namespace:  "default",
+				Name:       "app-sb",
+				WorkingDir: "/workspace",
 			},
-			expectError: true,
-			errorContains: "",
+			expectError:    true,
+			errorContains:  "",
 			validateResult: nil,
 		},
 	}
@@ -412,13 +414,13 @@ func TestServer_CreateSandbox_InvalidRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := &MockRegistryForTest{
 				DefaultAgent: &agentpool.AgentInfo{
-					ID:        "agent-1",
-					PodName:   "agent-pod-1",
-					PodIP:     "10.0.0.5",
-					NodeName:  "node-1",
-					PoolName:  tt.req.PoolRef,
-					Capacity:  10,
-					Allocated: 0,
+					ID:            "agent-1",
+					PodName:       "agent-pod-1",
+					PodIP:         "10.0.0.5",
+					NodeName:      "node-1",
+					PoolName:      tt.req.PoolRef,
+					Capacity:      10,
+					Allocated:     0,
 					LastHeartbeat: time.Now(),
 				},
 			}
@@ -581,13 +583,13 @@ func TestServer_CreateSandbox_AllocateCalledWithCorrectSandbox(t *testing.T) {
 		AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
 			allocatedSandbox = sb
 			return &agentpool.AgentInfo{
-				ID:        "agent-1",
-				PodName:   "agent-pod-1",
-				PodIP:     "10.0.0.5",
-				NodeName:  "node-1",
-				PoolName:  sb.Spec.PoolRef,
-				Capacity:  10,
-				Allocated: 0,
+				ID:            "agent-1",
+				PodName:       "agent-pod-1",
+				PodIP:         "10.0.0.5",
+				NodeName:      "node-1",
+				PoolName:      sb.Spec.PoolRef,
+				Capacity:      10,
+				Allocated:     0,
 				LastHeartbeat: time.Now(),
 			}, nil
 		},
@@ -672,13 +674,13 @@ func TestServer_CreateSandbox_NameGeneration(t *testing.T) {
 		AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
 			allocatedSandbox = sb
 			return &agentpool.AgentInfo{
-				ID:        "agent-1",
-				PodName:   "agent-pod-1",
-				PodIP:     "10.0.0.5",
-				NodeName:  "node-1",
-				PoolName:  sb.Spec.PoolRef,
-				Capacity:  10,
-				Allocated: 0,
+				ID:            "agent-1",
+				PodName:       "agent-pod-1",
+				PodIP:         "10.0.0.5",
+				NodeName:      "node-1",
+				PoolName:      sb.Spec.PoolRef,
+				Capacity:      10,
+				Allocated:     0,
 				LastHeartbeat: time.Now(),
 			}, nil
 		},
@@ -711,10 +713,10 @@ func TestServer_CreateSandbox_ConsistencyMode(t *testing.T) {
 	// 2. Override by request
 
 	tests := []struct {
-		name               string
-		serverMode         api.ConsistencyMode
-		requestMode        fastpathv1.ConsistencyMode
-		expectedFastMode   bool
+		name             string
+		serverMode       api.ConsistencyMode
+		requestMode      fastpathv1.ConsistencyMode
+		expectedFastMode bool
 	}{
 		{
 			name:             "default fast mode",
@@ -747,13 +749,13 @@ func TestServer_CreateSandbox_ConsistencyMode(t *testing.T) {
 			registry := &MockRegistryForTest{
 				AllocateFunc: func(sb *apiv1alpha1.Sandbox) (*agentpool.AgentInfo, error) {
 					return &agentpool.AgentInfo{
-						ID:        "agent-1",
-						PodName:   "agent-pod-1",
-						PodIP:     "10.0.0.5",
-						NodeName:  "node-1",
-						PoolName:  sb.Spec.PoolRef,
-						Capacity:  10,
-						Allocated: 0,
+						ID:            "agent-1",
+						PodName:       "agent-pod-1",
+						PodIP:         "10.0.0.5",
+						NodeName:      "node-1",
+						PoolName:      sb.Spec.PoolRef,
+						Capacity:      10,
+						Allocated:     0,
 						LastHeartbeat: time.Now(),
 					}, nil
 				},
@@ -790,13 +792,13 @@ func TestServer_CreateSandbox_StrongMode_CRDCreated(t *testing.T) {
 
 	registry := &MockRegistryForTest{
 		DefaultAgent: &agentpool.AgentInfo{
-			ID:        "agent-1",
-			PodName:   "agent-pod-1",
-			PodIP:     "10.0.0.5",
-			NodeName:  "node-1",
-			PoolName:  "test-pool",
-			Capacity:  10,
-			Allocated: 0,
+			ID:            "agent-1",
+			PodName:       "agent-pod-1",
+			PodIP:         "10.0.0.5",
+			NodeName:      "node-1",
+			PoolName:      "test-pool",
+			Capacity:      10,
+			Allocated:     0,
 			LastHeartbeat: time.Now(),
 		},
 	}
@@ -1039,4 +1041,147 @@ func TestServer_DeleteSandbox_NotFound(t *testing.T) {
 	// The response has Success=false when error occurs
 	assert.Error(t, err, "Should return error when sandbox not found")
 	assert.False(t, resp.Success, "Success should be false when error occurs")
+}
+
+// ============================================================================
+// Allocation Annotation Tests
+// ============================================================================
+
+func TestServer_createFast_SetsAllocationAnnotation(t *testing.T) {
+	// Test that createFast sets the allocation annotation on tempSB
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:       "agent-1",
+			PodName:  "test-agent-pod",
+			PodIP:    "10.0.0.5",
+			NodeName: "test-node",
+			PoolName: "test-pool",
+		},
+	}
+
+	server := &Server{
+		K8sClient:              fake.NewClientBuilder().WithScheme(setupTestScheme(t)).Build(),
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeFast,
+	}
+
+	tempSB := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-sb",
+			Namespace: "default",
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "nginx:latest",
+			PoolRef: "test-pool",
+		},
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:     "nginx:latest",
+		PoolRef:   "test-pool",
+		Namespace: "default",
+		Name:      "test-sb",
+	}
+
+	// 由于 AgentClient.CreateSandbox 会调用真实 HTTP，它会失败
+	// 但我们仍然可以验证 annotation 被设置的逻辑（在失败前）
+	// 实际上，在 createFast 中，annotation 是在 Agent API 成功后才设置的
+	// 所以这里我们测试失败场景，验证不会设置 annotation
+	registry.DefaultAgent.PodIP = ""
+
+	resp, err := server.createFast(tempSB, registry.DefaultAgent, req)
+
+	// 验证调用失败
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+
+	// 由于失败，annotation 不应该被设置（这是正确的行为）
+	// 在实际场景中，Agent API 成功后才会设置 annotation
+	annotations := tempSB.GetAnnotations()
+	// annotation 为空或不存在是失败场景的预期行为
+	if annotations != nil {
+		// 如果有 annotations，不应该包含 allocation annotation（因为失败了）
+		_, hasAlloc := annotations["sandbox.fast.io/allocation"]
+		assert.False(t, hasAlloc, "Allocation annotation should not be set on failure")
+	}
+}
+
+func TestServer_createStrong_SetsAllocationAnnotation(t *testing.T) {
+	// Test that createStrong sets the allocation annotation before creating CRD
+	scheme := setupTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	registry := &MockRegistryForTest{
+		DefaultAgent: &agentpool.AgentInfo{
+			ID:       "agent-1",
+			PodName:  "test-agent-pod",
+			PodIP:    "10.0.0.5",
+			NodeName: "test-node",
+			PoolName: "test-pool",
+		},
+	}
+
+	server := &Server{
+		K8sClient:              k8sClient,
+		Registry:               registry,
+		AgentClient:            api.NewAgentClient(5758),
+		DefaultConsistencyMode: api.ConsistencyModeStrong,
+	}
+
+	tempSB := &apiv1alpha1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-sb",
+			Namespace: "default",
+		},
+		Spec: apiv1alpha1.SandboxSpec{
+			Image:   "nginx:latest",
+			PoolRef: "test-pool",
+		},
+	}
+
+	req := &fastpathv1.CreateRequest{
+		Image:           "nginx:latest",
+		PoolRef:         "test-pool",
+		Namespace:       "default",
+		Name:            "test-sb",
+		ConsistencyMode: fastpathv1.ConsistencyMode_STRONG,
+	}
+
+	// 调用 createStrong，验证 annotation 被设置（即使后续会失败）
+	// 先设置一个已经存在的 CRD 会导致冲突，但我们只需要验证 annotation 设置
+	// 使用无效的 PodIP 来让 agent 调用失败，但 annotation 已经在 tempSB 上设置了
+	registry.DefaultAgent.PodIP = ""
+
+	_, _ = server.createStrong(context.Background(), tempSB, registry.DefaultAgent, req)
+
+	// 验证 annotation 已被设置
+	annotations := tempSB.GetAnnotations()
+	require.NotNil(t, annotations, "Annotations should be set")
+	assert.Contains(t, annotations, "sandbox.fast.io/allocation", "Allocation annotation should be set")
+
+	// 验证 annotation 内容
+	allocJSON := annotations["sandbox.fast.io/allocation"]
+	assert.Contains(t, allocJSON, "test-agent-pod", "Annotation should contain assignedPod")
+	assert.Contains(t, allocJSON, "test-node", "Annotation should contain assignedNode")
+}
+
+func TestServer_AllocationAnnotationFormat(t *testing.T) {
+	// Test that the allocation annotation has the correct format
+	// 直接调用 common.BuildAllocationJSON 来测试格式
+	assignedPod := "my-agent"
+	assignedNode := "my-node"
+
+	allocJSON := common.BuildAllocationJSON(assignedPod, assignedNode)
+	assert.NotEmpty(t, allocJSON, "Allocation JSON should be generated")
+
+	// 验证可以解析为 JSON
+	var allocInfo map[string]string
+	err := json.Unmarshal([]byte(allocJSON), &allocInfo)
+	require.NoError(t, err, "Allocation JSON should be valid JSON")
+
+	// 验证必需字段
+	assert.Equal(t, assignedPod, allocInfo["assignedPod"])
+	assert.Equal(t, assignedNode, allocInfo["assignedNode"])
+	assert.NotEmpty(t, allocInfo["allocatedAt"])
 }

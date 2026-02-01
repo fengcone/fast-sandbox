@@ -9,6 +9,7 @@ import (
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
+	"fast-sandbox/internal/controller/common"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,6 @@ var _ fastpathv1.FastPathServiceServer = &Server{}
 
 func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
 	start := time.Now()
-	logger := klog.FromContext(ctx)
 
 	mode := s.DefaultConsistencyMode
 	if req.ConsistencyMode == fastpathv1.ConsistencyMode_STRONG {
@@ -55,7 +55,7 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 		sandboxName = fmt.Sprintf("sb-%d", time.Now().UnixNano())
 	}
 
-	logger.V(2).Info("FastPath CreateSandbox called", "name", sandboxName, "namespace", req.Namespace)
+	klog.InfoS("FastPath CreateSandbox called", "name", sandboxName, "namespace", req.Namespace)
 
 	tempSB := &apiv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{
@@ -75,19 +75,19 @@ func (s *Server) CreateSandbox(ctx context.Context, req *fastpathv1.CreateReques
 
 	agent, err := s.Registry.Allocate(tempSB)
 	if err != nil {
-		logger.Error(err, "Failed to allocate agent for sandbox", "name", sandboxName, "namespace", req.Namespace)
+		klog.Error(err, "Failed to allocate agent for sandbox", "name", sandboxName, "namespace", req.Namespace)
 		return nil, err
 	}
 
-	logger.V(2).Info("Agent allocated", "agentID", agent.ID, "duration", time.Since(start))
+	klog.InfoS("Agent allocated", "agentID", agent.ID, "duration", time.Since(start))
 
 	if mode == api.ConsistencyModeStrong {
 		return s.createStrong(ctx, tempSB, agent, req)
 	}
-	return s.createFast(ctx, tempSB, agent, req)
+	return s.createFast(tempSB, agent, req)
 }
 
-func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
+func (s *Server) createFast(tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo, req *fastpathv1.CreateRequest) (*fastpathv1.CreateResponse, error) {
 	start := time.Now()
 	var err error
 	defer func() {
@@ -95,9 +95,14 @@ func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, ag
 		success := "true"
 		if err != nil {
 			success = "false"
+			klog.ErrorS(err, "Fast mode sandbox creation failed", "name", tempSB.Name, "namespace", tempSB.Namespace, "duration", duration)
+		} else {
+			klog.InfoS("Fast mode sandbox creation completed", "name", tempSB.Name, "namespace", tempSB.Namespace, "duration", duration)
 		}
 		createSandboxDuration.WithLabelValues("fast", success).Observe(duration)
 	}()
+
+	klog.InfoS("Creating sandbox via agent (fast mode)", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPodIP", agent.PodIP, "agentPod", agent.PodName)
 
 	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
@@ -111,12 +116,21 @@ func (s *Server) createFast(ctx context.Context, tempSB *apiv1alpha1.Sandbox, ag
 		},
 	})
 	if err != nil {
+		klog.ErrorS(err, "Failed to create sandbox on agent", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPodIP", agent.PodIP)
 		s.Registry.Release(agent.ID, tempSB)
 		return nil, err
 	}
 
+	klog.InfoS("Sandbox created on agent, setting allocation annotation", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPod", agent.PodName, "node", agent.NodeName)
+
+	// 设置 allocation annotation，Controller 会搬运到 status 后删除
+	tempSB.SetAnnotations(map[string]string{
+		common.AnnotationAllocation: common.BuildAllocationJSON(agent.PodName, agent.NodeName),
+	})
+	// Status 留空，由 Controller 从 annotation 同步
+
 	asyncCtx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	go s.asyncCreateCRDWithRetry(asyncCtx, tempSB, agent.ID, agent.PodName, agent.NodeName)
+	go s.asyncCreateCRDWithRetry(asyncCtx, tempSB)
 	return &fastpathv1.CreateResponse{SandboxId: tempSB.Name, AgentPod: agent.PodName, Endpoints: s.getEndpoints(agent.PodIP, tempSB)}, nil
 }
 
@@ -128,14 +142,28 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 		success := "true"
 		if err != nil {
 			success = "false"
+			klog.ErrorS(err, "Strong mode sandbox creation failed", "name", tempSB.Name, "namespace", tempSB.Namespace, "duration", duration)
+		} else {
+			klog.InfoS("Strong mode sandbox creation completed", "name", tempSB.Name, "namespace", tempSB.Namespace, "duration", duration)
 		}
 		createSandboxDuration.WithLabelValues("strong", success).Observe(duration)
 	}()
 
+	klog.InfoS("Creating sandbox CRD first (strong mode)", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPod", agent.PodName, "node", agent.NodeName)
+
+	// 设置 allocation annotation，与 CRD 创建同步
+	tempSB.SetAnnotations(map[string]string{
+		common.AnnotationAllocation: common.BuildAllocationJSON(agent.PodName, agent.NodeName),
+	})
+	// Status 留空，由 Controller 从 annotation 同步
+
 	if err = s.K8sClient.Create(ctx, tempSB); err != nil {
+		klog.ErrorS(err, "Failed to create sandbox CRD", "name", tempSB.Name, "namespace", tempSB.Namespace)
 		s.Registry.Release(agent.ID, tempSB)
 		return nil, err
 	}
+
+	klog.InfoS("Sandbox CRD created, proceeding to create on agent", "name", tempSB.Name, "namespace", tempSB.Namespace, "uid", tempSB.UID)
 
 	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
@@ -150,35 +178,31 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 		},
 	})
 	if err != nil {
+		klog.ErrorS(err, "Failed to create sandbox on agent, rolling back CRD", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPodIP", agent.PodIP)
 		s.K8sClient.Delete(ctx, tempSB)
 		s.Registry.Release(agent.ID, tempSB)
 		return nil, err
 	}
 
-	retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &apiv1alpha1.Sandbox{}
-		if err := s.K8sClient.Get(ctx, client.ObjectKeyFromObject(tempSB), latest); err != nil {
-			return err
-		}
-		latest.Status.Phase = "Bound"
-		latest.Status.AssignedPod = agent.PodName
-		latest.Status.NodeName = agent.NodeName
-		return s.K8sClient.Status().Update(ctx, latest)
-	})
+	klog.InfoS("Sandbox created on agent, Controller will sync allocation from annotation to status", "name", tempSB.Name, "namespace", tempSB.Namespace, "assignedPod", agent.PodName, "nodeName", agent.NodeName)
 
 	return &fastpathv1.CreateResponse{SandboxId: tempSB.Name, AgentPod: agent.PodName, Endpoints: s.getEndpoints(agent.PodIP, tempSB)}, nil
 }
 
-func (s *Server) asyncCreateCRDWithRetry(ctx context.Context, sb *apiv1alpha1.Sandbox, agentID agentpool.AgentID, podName, nodeName string) {
+// asyncCreateCRDWithRetry 异步创建 CRD，分配信息已在 annotation 中
+func (s *Server) asyncCreateCRDWithRetry(ctx context.Context, sb *apiv1alpha1.Sandbox) {
+	klog.InfoS("Starting async CRD creation with retry", "name", sb.Name, "namespace", sb.Namespace, "maxRetries", maxRetries)
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		sb.Status.Phase = "Bound"
-		sb.Status.AssignedPod = podName
-		sb.Status.NodeName = nodeName
-		if err := s.K8sClient.Create(ctx, sb); err == nil {
+		err := s.K8sClient.Create(ctx, sb)
+		if err == nil {
+			klog.InfoS("Async CRD creation succeeded", "name", sb.Name, "namespace", sb.Namespace, "attempt", attempt+1)
 			return
 		}
+		klog.InfoS("Async CRD creation failed, retrying", "name", sb.Name, "namespace", sb.Namespace, "attempt", attempt+1, "error", err)
 		time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 	}
+	klog.ErrorS(nil, "Async CRD creation failed after all retries", "name", sb.Name, "namespace", sb.Namespace, "maxRetries", maxRetries)
 }
 
 func (s *Server) getEndpoints(ip string, sb *apiv1alpha1.Sandbox) []string {
@@ -191,8 +215,11 @@ func (s *Server) getEndpoints(ip string, sb *apiv1alpha1.Sandbox) []string {
 
 func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest) (*fastpathv1.ListResponse, error) {
 	namespace := req.Namespace
+	klog.InfoS("Listing sandboxes", "namespace", namespace)
+
 	var sbList apiv1alpha1.SandboxList
 	if err := s.K8sClient.List(ctx, &sbList, client.InNamespace(namespace)); err != nil {
+		klog.ErrorS(err, "Failed to list sandboxes", "namespace", namespace)
 		return nil, err
 	}
 
@@ -209,13 +236,17 @@ func (s *Server) ListSandboxes(ctx context.Context, req *fastpathv1.ListRequest)
 		})
 	}
 
+	klog.InfoS("Listed sandboxes successfully", "namespace", namespace, "count", len(res.Items))
 	return res, nil
 }
 
 func (s *Server) GetSandbox(ctx context.Context, req *fastpathv1.GetRequest) (*fastpathv1.SandboxInfo, error) {
 	namespace := req.Namespace
+	klog.InfoS("Getting sandbox", "name", req.SandboxId, "namespace", namespace)
+
 	var sb apiv1alpha1.Sandbox
 	if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: namespace}, &sb); err != nil {
+		klog.ErrorS(err, "Failed to get sandbox", "name", req.SandboxId, "namespace", namespace)
 		return nil, err
 	}
 
@@ -232,16 +263,24 @@ func (s *Server) GetSandbox(ctx context.Context, req *fastpathv1.GetRequest) (*f
 
 func (s *Server) DeleteSandbox(ctx context.Context, req *fastpathv1.DeleteRequest) (*fastpathv1.DeleteResponse, error) {
 	ns := req.Namespace
+	klog.InfoS("Deleting sandbox", "name", req.SandboxId, "namespace", ns)
+
 	sb := &apiv1alpha1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: req.SandboxId, Namespace: ns}}
 	if err := s.K8sClient.Delete(ctx, sb); err != nil {
+		klog.ErrorS(err, "Failed to delete sandbox", "name", req.SandboxId, "namespace", ns)
 		return &fastpathv1.DeleteResponse{Success: false}, err
 	}
+
+	klog.InfoS("Sandbox deleted successfully", "name", req.SandboxId, "namespace", ns)
 	return &fastpathv1.DeleteResponse{Success: true}, nil
 }
 
 func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateRequest) (*fastpathv1.UpdateResponse, error) {
+	klog.InfoS("Updating sandbox", "name", req.SandboxId, "namespace", req.Namespace)
+
 	var sb apiv1alpha1.Sandbox
 	if err := s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, &sb); err != nil {
+		klog.ErrorS(err, "Failed to get sandbox for update", "name", req.SandboxId, "namespace", req.Namespace)
 		return &fastpathv1.UpdateResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to get sandbox: %v", err),
@@ -256,6 +295,7 @@ func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateReques
 
 		switch v := req.Update.(type) {
 		case *fastpathv1.UpdateRequest_ExpireTimeSeconds:
+			klog.InfoS("Updating ExpireTime", "name", req.SandboxId, "expireTimeSeconds", v.ExpireTimeSeconds)
 			if v.ExpireTimeSeconds == 0 {
 				latest.Spec.ExpireTime = nil
 			} else {
@@ -263,19 +303,23 @@ func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateReques
 				latest.Spec.ExpireTime = &t
 			}
 		case *fastpathv1.UpdateRequest_ResetRevision:
+			klog.InfoS("Updating ResetRevision", "name", req.SandboxId, "resetRevision", v.ResetRevision)
 			t, err := time.Parse(time.RFC3339Nano, v.ResetRevision)
 			if err != nil {
 				return fmt.Errorf("invalid reset_revision format: %v", err)
 			}
 			latest.Spec.ResetRevision = &metav1.Time{Time: t}
 		case *fastpathv1.UpdateRequest_FailurePolicy:
+			klog.InfoS("Updating FailurePolicy", "name", req.SandboxId, "failurePolicy", v.FailurePolicy)
 			latest.Spec.FailurePolicy = toFailurePolicy(v.FailurePolicy)
 		case *fastpathv1.UpdateRequest_RecoveryTimeoutSeconds:
+			klog.InfoS("Updating RecoveryTimeoutSeconds", "name", req.SandboxId, "recoveryTimeoutSeconds", v.RecoveryTimeoutSeconds)
 			latest.Spec.RecoveryTimeoutSeconds = v.RecoveryTimeoutSeconds
 		}
 
 		// 更新标签
 		if len(req.Labels) > 0 {
+			klog.InfoS("Updating labels", "name", req.SandboxId, "labels", req.Labels)
 			if latest.Labels == nil {
 				latest.Labels = make(map[string]string)
 			}
@@ -288,11 +332,14 @@ func (s *Server) UpdateSandbox(ctx context.Context, req *fastpathv1.UpdateReques
 	})
 
 	if err != nil {
+		klog.ErrorS(err, "Failed to update sandbox", "name", req.SandboxId, "namespace", req.Namespace)
 		return &fastpathv1.UpdateResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to update sandbox: %v", err),
 		}, nil
 	}
+
+	klog.InfoS("Sandbox updated successfully", "name", req.SandboxId, "namespace", req.Namespace)
 
 	s.K8sClient.Get(ctx, client.ObjectKey{Name: req.SandboxId, Namespace: req.Namespace}, &sb)
 
