@@ -8,6 +8,8 @@ import (
 const (
 	// AnnotationAllocation 临时存储 FastPath 的分配信息，Controller 会搬运到 status 后删除
 	AnnotationAllocation = "sandbox.fast.io/allocation"
+	// AnnotationCreateTimestamp 存储 Fast 模式创建时的时间戳，用于幂等性检查
+	AnnotationCreateTimestamp = "sandbox.fast.io/createTimestamp"
 )
 
 // AllocationInfo 临时分配信息

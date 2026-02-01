@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Note: SandboxID can be any string format (md5 hash for Fast mode, UID for Strong mode, or legacy name).
+// Tests use simple strings for readability.
+
 // ============================================================================
 // Test Helpers
 // ============================================================================

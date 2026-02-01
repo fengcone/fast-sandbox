@@ -103,6 +103,16 @@ func (r *SandboxReconciler) ensureFinalizer(ctx context.Context, sandbox *apiv1a
 	return err
 }
 
+// getSandboxID returns the sandboxID to use when calling Agent API.
+// Prefers status.sandboxID if set, otherwise falls back to name (legacy).
+func (r *SandboxReconciler) getSandboxID(sandbox *apiv1alpha1.Sandbox) string {
+	if sandbox.Status.SandboxID != "" {
+		return sandbox.Status.SandboxID
+	}
+	// Legacy fallback for CRDs created before sandboxID was set
+	return sandbox.Name
+}
+
 // ============================================================================
 // Deletion State Machine
 // ============================================================================
@@ -617,7 +627,7 @@ func (r *SandboxReconciler) handleCreateOnAgent(ctx context.Context, sandbox *ap
 
 	_, err := r.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
-			SandboxID:  sandbox.Name,
+			SandboxID:  r.getSandboxID(sandbox),
 			ClaimName:  sandbox.Name,
 			Image:      sandbox.Spec.Image,
 			Command:    sandbox.Spec.Command,
@@ -648,10 +658,11 @@ func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1a
 
 	klog.Info("[DEBUG-DELETE-FROM-AGENT] Calling Agent DeleteSandbox API",
 		"agentPodIP", agent.PodIP,
-		"sandboxID", sandbox.Name)
+		"name", sandbox.Name,
+		"sandboxID", r.getSandboxID(sandbox))
 
 	_, err := r.AgentClient.DeleteSandbox(agent.PodIP, &api.DeleteSandboxRequest{
-		SandboxID: sandbox.Name,
+		SandboxID: r.getSandboxID(sandbox),
 	})
 	if err != nil {
 		klog.Error("[DEBUG-DELETE-FROM-AGENT] DeleteSandbox API failed", "err", err)
@@ -664,7 +675,8 @@ func (r *SandboxReconciler) deleteFromAgent(ctx context.Context, sandbox *apiv1a
 
 // syncStatusFromAgent synchronizes sandbox status from Agent's reported status.
 func (r *SandboxReconciler) syncStatusFromAgent(ctx context.Context, sandbox *apiv1alpha1.Sandbox, agent *agentpool.AgentInfo) error {
-	status, hasStatus := agent.SandboxStatuses[sandbox.Name]
+	// Agent statuses are keyed by SandboxID (hash or UID), not by name
+	status, hasStatus := agent.SandboxStatuses[r.getSandboxID(sandbox)]
 	if !hasStatus {
 		return nil
 	}

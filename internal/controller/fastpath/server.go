@@ -3,6 +3,7 @@ package fastpath
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
@@ -10,6 +11,7 @@ import (
 	"fast-sandbox/internal/api"
 	"fast-sandbox/internal/controller/agentpool"
 	"fast-sandbox/internal/controller/common"
+	"fast-sandbox/pkg/util/idgen"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,11 +104,15 @@ func (s *Server) createFast(tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentI
 		createSandboxDuration.WithLabelValues("fast", success).Observe(duration)
 	}()
 
-	klog.InfoS("Creating sandbox via agent (fast mode)", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPodIP", agent.PodIP, "agentPod", agent.PodName)
+	// Generate sandboxID using md5 hash
+	createTimestamp := time.Now().UnixNano()
+	sandboxID := idgen.GenerateHashID(tempSB.Name, tempSB.Namespace, createTimestamp)
+
+	klog.InfoS("Creating sandbox via agent (fast mode)", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPodIP", agent.PodIP, "agentPod", agent.PodName, "sandboxID", sandboxID)
 
 	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
-			SandboxID:  tempSB.Name,
+			SandboxID:  sandboxID,
 			ClaimName:  tempSB.Name,
 			Image:      tempSB.Spec.Image,
 			Command:    tempSB.Spec.Command,
@@ -123,11 +129,13 @@ func (s *Server) createFast(tempSB *apiv1alpha1.Sandbox, agent *agentpool.AgentI
 
 	klog.InfoS("Sandbox created on agent, setting allocation annotation", "name", tempSB.Name, "namespace", tempSB.Namespace, "agentPod", agent.PodName, "node", agent.NodeName)
 
-	// 设置 allocation annotation，Controller 会搬运到 status 后删除
+	// 设置 allocation annotation 和 createTimestamp，Controller 会搬运到 status 后删除
 	tempSB.SetAnnotations(map[string]string{
-		common.AnnotationAllocation: common.BuildAllocationJSON(agent.PodName, agent.NodeName),
+		common.AnnotationAllocation:      common.BuildAllocationJSON(agent.PodName, agent.NodeName),
+		common.AnnotationCreateTimestamp: strconv.FormatInt(createTimestamp, 10),
 	})
-	// Status 留空，由 Controller 从 annotation 同步
+	// 设置 Status 中的 SandboxID
+	tempSB.Status.SandboxID = sandboxID
 
 	asyncCtx, _ := context.WithTimeout(context.Background(), 30*time.Second)
 	go s.asyncCreateCRDWithRetry(asyncCtx, tempSB)
@@ -165,9 +173,13 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 
 	klog.InfoS("Sandbox CRD created, proceeding to create on agent", "name", tempSB.Name, "namespace", tempSB.Namespace, "uid", tempSB.UID)
 
+	// Use UID as sandboxID
+	sandboxID := string(tempSB.UID)
+	tempSB.Status.SandboxID = sandboxID
+
 	_, err = s.AgentClient.CreateSandbox(agent.PodIP, &api.CreateSandboxRequest{
 		Sandbox: api.SandboxSpec{
-			SandboxID:  tempSB.Name,
+			SandboxID:  sandboxID, // Changed from tempSB.Name to use UID
 			ClaimUID:   string(tempSB.UID),
 			ClaimName:  tempSB.Name,
 			Image:      tempSB.Spec.Image,
@@ -184,7 +196,13 @@ func (s *Server) createStrong(ctx context.Context, tempSB *apiv1alpha1.Sandbox, 
 		return nil, err
 	}
 
-	klog.InfoS("Sandbox created on agent, Controller will sync allocation from annotation to status", "name", tempSB.Name, "namespace", tempSB.Namespace, "assignedPod", agent.PodName, "nodeName", agent.NodeName)
+	// After Agent call succeeds, update CRD status with sandboxID
+	if err := s.K8sClient.Status().Update(ctx, tempSB); err != nil {
+		klog.ErrorS(err, "Failed to update CRD status with sandboxID", "name", tempSB.Name, "sandboxID", sandboxID)
+		// Non-fatal error, continue
+	}
+
+	klog.InfoS("Sandbox created on agent, Controller will sync allocation from annotation to status", "name", tempSB.Name, "namespace", tempSB.Namespace, "assignedPod", agent.PodName, "nodeName", agent.NodeName, "sandboxID", sandboxID)
 
 	return &fastpathv1.CreateResponse{SandboxId: tempSB.Name, AgentPod: agent.PodName, Endpoints: s.getEndpoints(agent.PodIP, tempSB)}, nil
 }
