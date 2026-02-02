@@ -4,5 +4,8 @@ metadata:
   name: sandbox-example
 spec:
   image: docker.io/library/alpine:latest
-  command: ["/bin/sleep", "3600"]
+  envs:
+    - name: SANDBOX_GREETING
+      value: "Hello from Fast Sandbox!"
+  command: ["/bin/sh", "-c", "i=0; while true; do echo \"[$SANDBOX_GREETING] Message $i: $(date)\"; i=$((i+1)); sleep 1; done"]
   poolRef: default-pool

@@ -4,13 +4,40 @@ describe() {
     echo "环境变量和工作目录 - 验证 Envs 和 WorkingDir 正确传递到容器"
 }
 
+# 辅助函数：获取实际的 sandboxID (通过 kubectl 从 CRD status 获取)
+get_sandbox_id() {
+    local ns=$1
+    local sandbox_name=$2
+    kubectl get sandbox "$sandbox_name" -n "$ns" -o jsonpath='{.status.sandboxID}' 2>/dev/null
+}
+
+# 辅助函数：解析 sandbox 标识符（可能是 name 或实际的 sandboxID）
+# 如果是 32 字符的哈希值，直接返回；否则通过 kubectl 查询
+resolve_sandbox_id() {
+    local ns=$1
+    local identifier=$2
+    # 如果是 32 字符的哈希值（MD5），直接使用
+    if [ ${#identifier} -eq 32 ]; then
+        echo "$identifier"
+    else
+        get_sandbox_id "$ns" "$identifier"
+    fi
+}
+
 # 辅助函数：通过容器日志验证环境变量（容器启动时输出到 stdout）
 verify_env_via_log() {
     local agent_pod=$1
     local ns=$2
-    local sandbox_id=$3
+    local sandbox_identifier=$3  # 可能是 name 或实际的 sandboxID
     local var_name=$4
     local expected_value=$5
+
+    # 解析实际的 sandboxID
+    local sandbox_id=$(resolve_sandbox_id "$ns" "$sandbox_identifier")
+    if [ -z "$sandbox_id" ]; then
+        echo "  ⚠ 无法解析 sandboxID: $sandbox_identifier"
+        return 1
+    fi
 
     # 容器命令会输出 "ENV_VAR_NAME=value" 格式
     # 通过 Agent 日志目录读取
@@ -25,8 +52,15 @@ verify_env_via_log() {
 verify_pwd_via_log() {
     local agent_pod=$1
     local ns=$2
-    local sandbox_id=$3
+    local sandbox_identifier=$3  # 可能是 name 或实际的 sandboxID
     local expected_value=$4
+
+    # 解析实际的 sandboxID
+    local sandbox_id=$(resolve_sandbox_id "$ns" "$sandbox_identifier")
+    if [ -z "$sandbox_id" ]; then
+        echo "  ⚠ 无法解析 sandboxID: $sandbox_identifier"
+        return 1
+    fi
 
     # 容器命令会输出 "PWD=/path" 格式
     local log_output=$(kubectl exec -n "$ns" "$agent_pod" -- cat /var/log/fast-sandbox/${sandbox_id}.log 2>/dev/null | grep "^PWD=" | cut -d= -f2)
@@ -89,7 +123,8 @@ EOF
         echo "  ✓ 环境变量 TEST_VAR 正确: test_value_123"
     else
         # 输出实际日志用于调试
-        LOG_CONTENT=$(kubectl exec -n "$TEST_NS" "$AGENT_POD" -- cat /var/log/fast-sandbox/sb-env-test.log 2>/dev/null || echo "log not found")
+        SANDBOX_ID=$(get_sandbox_id "$TEST_NS" "sb-env-test")
+        LOG_CONTENT=$(kubectl exec -n "$TEST_NS" "$AGENT_POD" -- cat /var/log/fast-sandbox/${SANDBOX_ID}.log 2>/dev/null || echo "log not found")
         echo "  ❌ 环境变量 TEST_VAR 错误. 日志内容: $LOG_CONTENT"
         kubectl delete sandboxpool $POOL_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         return 1
@@ -134,7 +169,8 @@ EOF
     if verify_pwd_via_log "$AGENT_POD" "$TEST_NS" "sb-workdir-test" "/tmp"; then
         echo "  ✓ 工作目录正确: /tmp"
     else
-        LOG_CONTENT=$(kubectl exec -n "$TEST_NS" "$AGENT_POD" -- cat /var/log/fast-sandbox/sb-workdir-test.log 2>/dev/null || echo "log not found")
+        SANDBOX_ID=$(get_sandbox_id "$TEST_NS" "sb-workdir-test")
+        LOG_CONTENT=$(kubectl exec -n "$TEST_NS" "$AGENT_POD" -- cat /var/log/fast-sandbox/${SANDBOX_ID}.log 2>/dev/null || echo "log not found")
         echo "  ❌ 工作目录错误. 日志内容: $LOG_CONTENT"
         kubectl delete sandbox sb-workdir-test -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
         kubectl delete sandboxpool $POOL_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1

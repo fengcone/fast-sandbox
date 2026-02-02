@@ -271,7 +271,7 @@ func (s *Server) GetSandbox(ctx context.Context, req *fastpathv1.GetRequest) (*f
 	}
 
 	return &fastpathv1.SandboxInfo{
-		SandboxId: sb.Name,
+		SandboxId: sb.Status.SandboxID,
 		Phase:     sb.Status.Phase,
 		AgentPod:  sb.Status.AssignedPod,
 		Endpoints: sb.Status.Endpoints,

@@ -467,9 +467,7 @@ func (r *ContainerdRuntime) GetSandboxLogs(ctx context.Context, sandboxID string
 	file, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-
 			return fmt.Errorf("log file not found")
-
 		}
 		return err
 	}

@@ -65,8 +65,9 @@ var logsCmd = &cobra.Command{
 			}
 		}()
 
-		url := fmt.Sprintf("http://localhost:%d/api/v1/agent/logs?sandboxId=%s&follow=%t", localPort, name, follow)
-		klog.V(4).InfoS("Fetching logs from agent", "url", url)
+		// Use the actual sandboxID (hash) instead of name for Agent API
+		url := fmt.Sprintf("http://localhost:%d/api/v1/agent/logs?sandboxId=%s&follow=%t", localPort, info.SandboxId, follow)
+		klog.InfoS("Fetching logs from agent", "sandboxID", info.SandboxId, "url", url)
 		resp, err := http.Get(url)
 		if err != nil {
 			klog.ErrorS(err, "Failed to connect to agent", "url", url)
