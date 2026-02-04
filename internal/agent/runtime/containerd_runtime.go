@@ -27,8 +27,8 @@ type ContainerdRuntime struct {
 	client             *containerd.Client
 	cgroupPath         string
 	netnsPath          string
-	agentID            string
-	agentUID           string
+	agentPodName       string
+	agentPodUID        string
 	agentNamespace     string
 	infraMgr           *infra.Manager
 	allowedPluginPaths []string
@@ -63,8 +63,8 @@ func (r *ContainerdRuntime) Initialize(ctx context.Context, socketPath string) e
 	}
 
 	r.client = client
-	r.agentID = os.Getenv("POD_NAME")
-	r.agentUID = os.Getenv("POD_UID")
+	r.agentPodName = os.Getenv("POD_NAME")
+	r.agentPodUID = os.Getenv("POD_UID")
 
 	allowedPaths := os.Getenv("ALLOWED_PLUGIN_PATHS")
 	if allowedPaths != "" {
@@ -334,8 +334,8 @@ func (r *ContainerdRuntime) isPluginPathAllowed(pluginPath string) bool {
 func (r *ContainerdRuntime) prepareLabels(config *api.SandboxSpec) map[string]string {
 	return map[string]string{
 		"fast-sandbox.io/managed":      "true",
-		"fast-sandbox.io/agent-name":   r.agentID,
-		"fast-sandbox.io/agent-uid":    r.agentUID,
+		"fast-sandbox.io/agent-name":   r.agentPodName,
+		"fast-sandbox.io/agent-uid":    r.agentPodUID,
 		"fast-sandbox.io/namespace":    r.agentNamespace,
 		"fast-sandbox.io/id":           config.SandboxID,
 		"fast-sandbox.io/claim-uid":    config.ClaimUID,

@@ -261,8 +261,8 @@ func TestContainerdRuntime_Initialize_EnvVars(t *testing.T) {
 	_ = cr.Initialize(ctx, "") // Connection may fail, but env vars should be read
 
 	// Verify environment variables were read
-	assert.Equal(t, testPodName, cr.agentID)
-	assert.Equal(t, testPodUID, cr.agentUID)
+	assert.Equal(t, testPodName, cr.agentPodName)
+	assert.Equal(t, testPodUID, cr.agentPodUID)
 	assert.Equal(t, []string{"/opt/path1", "/opt/path2"}, cr.allowedPluginPaths)
 	assert.NotNil(t, cr.infraMgr, "Infra manager should be initialized")
 }
@@ -371,8 +371,8 @@ func TestContainerdRuntime_DeleteSandbox_NotFound(t *testing.T) {
 func TestContainerdRuntime_prepareLabels(t *testing.T) {
 	// PL-01: Generates correct labels for sandbox
 	cr := &ContainerdRuntime{
-		agentID:        "test-agent",
-		agentUID:       "agent-uid-123",
+		agentPodName:   "test-agent",
+		agentPodUID:    "agent-uid-123",
 		agentNamespace: "default-ns",
 	}
 
@@ -401,8 +401,8 @@ func TestContainerdRuntime_prepareLabels(t *testing.T) {
 func TestContainerdRuntime_prepareLabels_EmptyAgentFields(t *testing.T) {
 	// PL-02: Handles empty agent fields
 	cr := &ContainerdRuntime{
-		agentID:        "",
-		agentUID:       "",
+		agentPodName:   "",
+		agentPodUID:    "",
 		agentNamespace: "",
 	}
 
@@ -437,47 +437,47 @@ func TestContainerdRuntime_isPluginPathAllowed(t *testing.T) {
 
 	// Note: filepath.EvalSymlinks requires the file to exist, so we create temp files
 	tests := []struct {
-		name            string
-		pluginPath      string
-		allowedPaths    []string
-		setupFiles      map[string]string // path -> content (empty for directories)
-		expectAllowed   bool
+		name          string
+		pluginPath    string
+		allowedPaths  []string
+		setupFiles    map[string]string // path -> content (empty for directories)
+		expectAllowed bool
 	}{
 		{
-			name:       "exact match with allowed path",
-			pluginPath: "/opt/fast-sandbox/infra/plugin",
+			name:         "exact match with allowed path",
+			pluginPath:   "/opt/fast-sandbox/infra/plugin",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
-				"/opt/fast-sandbox/infra":     "",
+				"/opt/fast-sandbox/infra":        "",
 				"/opt/fast-sandbox/infra/plugin": "content",
 			},
 			expectAllowed: true,
 		},
 		{
-			name:       "path within allowed directory",
-			pluginPath: "/opt/fast-sandbox/infra/subdir/plugin",
+			name:         "path within allowed directory",
+			pluginPath:   "/opt/fast-sandbox/infra/subdir/plugin",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
-				"/opt/fast-sandbox/infra":            "",
-				"/opt/fast-sandbox/infra/subdir":     "",
+				"/opt/fast-sandbox/infra":               "",
+				"/opt/fast-sandbox/infra/subdir":        "",
 				"/opt/fast-sandbox/infra/subdir/plugin": "content",
 			},
 			expectAllowed: true,
 		},
 		{
-			name:       "path outside allowed directory",
-			pluginPath: "/usr/bin/plugin",
+			name:         "path outside allowed directory",
+			pluginPath:   "/usr/bin/plugin",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
-				"/usr/bin":     "",
-				"/usr/bin/plugin": "content",
+				"/usr/bin":                "",
+				"/usr/bin/plugin":         "content",
 				"/opt/fast-sandbox/infra": "",
 			},
 			expectAllowed: false,
 		},
 		{
-			name:       "plugin path exactly equals allowed path",
-			pluginPath: "/opt/fast-sandbox/infra",
+			name:         "plugin path exactly equals allowed path",
+			pluginPath:   "/opt/fast-sandbox/infra",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
 				"/opt/fast-sandbox/infra": "",
@@ -485,40 +485,40 @@ func TestContainerdRuntime_isPluginPathAllowed(t *testing.T) {
 			expectAllowed: true,
 		},
 		{
-			name:       "trailing slash in allowed path",
-			pluginPath: "/opt/fast-sandbox/infra/plugin",
+			name:         "trailing slash in allowed path",
+			pluginPath:   "/opt/fast-sandbox/infra/plugin",
 			allowedPaths: []string{"/opt/fast-sandbox/infra/"},
 			setupFiles: map[string]string{
-				"/opt/fast-sandbox/infra/":     "",
+				"/opt/fast-sandbox/infra/":       "",
 				"/opt/fast-sandbox/infra/plugin": "content",
 			},
 			expectAllowed: true, // filepath.Clean removes trailing slash
 		},
 		{
-			name:       "multiple allowed paths",
-			pluginPath: "/usr/local/bin/plugin",
+			name:         "multiple allowed paths",
+			pluginPath:   "/usr/local/bin/plugin",
 			allowedPaths: []string{"/opt/fast-sandbox/infra", "/usr/local/bin"},
 			setupFiles: map[string]string{
 				"/opt/fast-sandbox/infra": "",
-				"/usr/local/bin":           "",
-				"/usr/local/bin/plugin":    "content",
+				"/usr/local/bin":          "",
+				"/usr/local/bin/plugin":   "content",
 			},
 			expectAllowed: true,
 		},
 		{
-			name:       "path traversal attempt",
-			pluginPath: "/opt/fast-sandbox/infra/../etc/passwd",
+			name:         "path traversal attempt",
+			pluginPath:   "/opt/fast-sandbox/infra/../etc/passwd",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
 				"/opt/fast-sandbox/infra": "",
-				"/etc":     "",
-				"/etc/passwd": "content",
+				"/etc":                    "",
+				"/etc/passwd":             "content",
 			},
 			expectAllowed: false, // Resolved path /etc/passwd is not under /opt/fast-sandbox/infra
 		},
 		{
-			name:       "non-existent file returns false",
-			pluginPath: "/opt/fast-sandbox/infra/nonexistent",
+			name:         "non-existent file returns false",
+			pluginPath:   "/opt/fast-sandbox/infra/nonexistent",
 			allowedPaths: []string{"/opt/fast-sandbox/infra"},
 			setupFiles: map[string]string{
 				"/opt/fast-sandbox/infra": "",
@@ -691,8 +691,8 @@ func TestEnvMapToSlice(t *testing.T) {
 			expected: []string{"PATH=/usr/bin:/bin", "HOME=/root", "USER=root"},
 		},
 		{
-			name: "variable with equals in value",
-			env:  map[string]string{"FOO": "bar=baz"},
+			name:     "variable with equals in value",
+			env:      map[string]string{"FOO": "bar=baz"},
 			expected: []string{"FOO=bar=baz"},
 		},
 	}

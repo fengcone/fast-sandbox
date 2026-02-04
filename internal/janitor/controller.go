@@ -84,7 +84,6 @@ func (j *Janitor) handlePodDeletion(ctx context.Context, pod *corev1.Pod) {
 	// 检查是否是 Agent Pod (通过 Label)
 	if pool, ok := pod.Labels["fast-sandbox.io/pool"]; ok {
 		klog.InfoS("Detected agent pod deletion, checking for orphans", "pod", pod.Name, "pool", pool)
-		// 扫描 Containerd 找出该 UID 关联的所有沙箱
 		j.enqueueOrphansByUID(ctx, string(pod.UID), pod.Name, pod.Namespace)
 	}
 }

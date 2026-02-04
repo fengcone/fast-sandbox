@@ -3,11 +3,12 @@ package janitor
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
+
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -15,7 +16,6 @@ import (
 
 func (j *Janitor) Scan(ctx context.Context) {
 	klog.InfoS("Starting periodic containerd scan with CRD reconciliation")
-
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	containers, err := j.ctrdClient.Containers(ctx, "labels.\"fast-sandbox.io/managed\"==\"true\"")
 	if err != nil {
@@ -35,18 +35,11 @@ func (j *Janitor) Scan(ctx context.Context) {
 		sandboxNamespace := labelsMap["fast-sandbox.io/namespace"]
 		claimUID := labelsMap["fast-sandbox.io/claim-uid"]
 
-		if agentUID == "" || sandboxName == "" {
+		if agentUID == "" || sandboxName == "" || sandboxNamespace == "" {
 			continue
 		}
 
-		// 如果没有 namespace 标签，使用 "default" 作为默认值（向后兼容）
-		if sandboxNamespace == "" {
-			sandboxNamespace = "default"
-		}
-
 		info, _ := c.Info(ctx)
-		// 安全缓冲：仅清理创建超过 OrphanTimeout 的容器
-		// 这是为了支持 Fast 模式，允许 CRD 异步创建
 		timeout := j.OrphanTimeout
 		if timeout == 0 {
 			timeout = defaultOrphanTimeout
@@ -58,25 +51,25 @@ func (j *Janitor) Scan(ctx context.Context) {
 		shouldCleanup := false
 		reason := ""
 
-		// 判定逻辑 1: Agent Pod 是否已经彻底消失？
 		if !j.podExists(agentUID) {
 			shouldCleanup = true
 			reason = "AgentPodDisappeared"
 		}
 
-		// 判定逻辑 2: Sandbox CRD 是否存在？
+		sandboxNotFound := false
 		if !shouldCleanup {
 			var sb apiv1alpha1.Sandbox
-			err := j.K8sClient.Get(ctx, client.ObjectKey{Name: sandboxName, Namespace: sandboxNamespace}, &sb)
+			err = j.K8sClient.Get(ctx, client.ObjectKey{Name: sandboxName, Namespace: sandboxNamespace}, &sb)
 			if err != nil {
-				if strings.Contains(err.Error(), "not found") {
+				if errors.IsNotFound(err) {
 					shouldCleanup = true
+					sandboxNotFound = true
 					reason = "SandboxCRDNotFound"
 				}
 			} else {
-				// 判定逻辑 3: 检查 UID 是否匹配（防止重置后的旧残留）
 				if claimUID != "" && string(sb.UID) != claimUID {
 					shouldCleanup = true
+					sandboxNotFound = true
 					reason = "UIDMismatch"
 				}
 			}
@@ -88,9 +81,12 @@ func (j *Janitor) Scan(ctx context.Context) {
 				"name", sandboxName,
 				"reason", reason)
 			j.queue.Add(CleanupTask{
-				ContainerID: c.ID(),
-				AgentUID:    agentUID,
-				PodName:     agentName,
+				ContainerID:     c.ID(),
+				AgentUID:        agentUID,
+				PodName:         agentName,
+				Namespace:       sandboxNamespace,
+				SandboxName:     sandboxName,
+				SandboxNotFound: sandboxNotFound,
 			})
 		}
 	}

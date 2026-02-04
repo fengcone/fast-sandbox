@@ -69,17 +69,17 @@ func TestCleanupFIFOs(t *testing.T) {
 }
 
 // ============================================================================
-// verifyPodExistsDirectly Tests
+// verifyPodExists Tests
 // ============================================================================
 
 func TestVerifyPodExistsDirectly_NoKubeClient(t *testing.T) {
-	// RED: 测试当没有 kubeClient 时 verifyPodExistsDirectly 返回 false
+	// RED: 测试当没有 kubeClient 时 verifyPodExists 返回 false
 	j := &Janitor{
 		kubeClient: nil,
 	}
 
 	ctx := context.Background()
-	exists := j.verifyPodExistsDirectly(ctx, "test-uid", "default")
+	exists := j.verifyPodExists(ctx, "test-uid", "default")
 
 	assert.False(t, exists, "没有 kubeClient 时应返回 false")
 }
@@ -91,7 +91,7 @@ func TestVerifyPodExistsDirectly_EmptyNamespace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	exists := j.verifyPodExistsDirectly(ctx, "test-uid", "")
+	exists := j.verifyPodExists(ctx, "test-uid", "")
 
 	assert.False(t, exists, "没有 kubeClient 时应返回 false")
 }
