@@ -7,6 +7,7 @@ By pre-warming "Agent Pod" resource pools and directly integrating with host-lev
 ## Features
 
 - **Fast-Path API**: gRPC-based fast path supporting **<50ms** end-to-end startup latency. Dual-mode switching between **Fast Mode** (Agent-First, ultra-fast) and **Strong Mode** (CRD-First, strong consistency).
+  <img width="480" height="97" alt="image" src="https://github.com/user-attachments/assets/c37c3a99-59a3-469b-9797-c6fe5530cfa9" />
 - **Developer CLI (`fsb-ctl`)**: Docker-like command-line experience with interactive creation, configuration management, streaming log viewing (`logs -f`), and status queries.
 - **Zero-Pull Startup**: Leverages **Host Containerd Integration** to launch microcontainers directly on the host, reusing node image cache.
 - **Smart Scheduling**: Allocation algorithm based on **Image Affinity** and **Atomic Slots**, eliminating image pull latency and avoiding port conflicts.
