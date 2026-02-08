@@ -864,6 +864,7 @@ func TestServer_ListSandboxes(t *testing.T) {
 			PoolRef: "pool-1",
 		},
 		Status: apiv1alpha1.SandboxStatus{
+			SandboxID:   "container-sb1",
 			Phase:       "Bound",
 			AssignedPod: "agent-1",
 			Endpoints:   []string{"10.0.0.1:80"},
@@ -881,6 +882,7 @@ func TestServer_ListSandboxes(t *testing.T) {
 			PoolRef: "pool-2",
 		},
 		Status: apiv1alpha1.SandboxStatus{
+			SandboxID:   "container-sb2",
 			Phase:       "Pending",
 			AssignedPod: "",
 		},
@@ -901,10 +903,10 @@ func TestServer_ListSandboxes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, resp.Items, 2, "Should return 2 sandboxes")
 
-	// Find sb-1
+	// Find sb-1 (use SandboxName)
 	var sb1Info *fastpathv1.SandboxInfo
 	for _, item := range resp.Items {
-		if item.SandboxId == "sb-1" {
+		if item.SandboxName == "sb-1" {
 			sb1Info = item
 			break
 		}
@@ -932,6 +934,7 @@ func TestServer_GetSandbox(t *testing.T) {
 			PoolRef: "pool-1",
 		},
 		Status: apiv1alpha1.SandboxStatus{
+			SandboxID:   "container-12345",
 			Phase:       "Bound",
 			AssignedPod: "agent-1",
 			Endpoints:   []string{"10.0.0.1:80"},
@@ -945,14 +948,15 @@ func TestServer_GetSandbox(t *testing.T) {
 	}
 
 	req := &fastpathv1.GetRequest{
-		SandboxId: "test-sb",
-		Namespace: "default",
+		SandboxName: "test-sb",
+		Namespace:   "default",
 	}
 
 	resp, err := server.GetSandbox(context.Background(), req)
 
 	require.NoError(t, err)
-	assert.Equal(t, "test-sb", resp.SandboxId)
+	assert.Equal(t, "container-12345", resp.SandboxId, "SandboxId should match Status.SandboxID")
+	assert.Equal(t, "test-sb", resp.SandboxName, "SandboxName should match CRD name")
 	assert.Equal(t, "Bound", resp.Phase)
 	assert.Equal(t, "agent-1", resp.AgentPod)
 	assert.Equal(t, "nginx", resp.Image)
@@ -972,8 +976,8 @@ func TestServer_GetSandbox_NotFound(t *testing.T) {
 	}
 
 	req := &fastpathv1.GetRequest{
-		SandboxId: "non-existent",
-		Namespace: "default",
+		SandboxName: "non-existent",
+		Namespace:   "default",
 	}
 
 	resp, err := server.GetSandbox(context.Background(), req)
@@ -1005,8 +1009,8 @@ func TestServer_DeleteSandbox(t *testing.T) {
 	}
 
 	req := &fastpathv1.DeleteRequest{
-		SandboxId: "test-sb",
-		Namespace: "default",
+		SandboxName: "test-sb",
+		Namespace:   "default",
 	}
 
 	resp, err := server.DeleteSandbox(context.Background(), req)
@@ -1031,8 +1035,8 @@ func TestServer_DeleteSandbox_NotFound(t *testing.T) {
 	}
 
 	req := &fastpathv1.DeleteRequest{
-		SandboxId: "non-existent",
-		Namespace: "default",
+		SandboxName: "non-existent",
+		Namespace:   "default",
 	}
 
 	resp, err := server.DeleteSandbox(context.Background(), req)

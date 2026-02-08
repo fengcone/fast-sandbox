@@ -4,11 +4,17 @@ describe() {
     echo "环境变量和工作目录 - 验证 Envs 和 WorkingDir 正确传递到容器"
 }
 
-# 辅助函数：获取实际的 sandboxID (通过 kubectl 从 CRD status 获取)
+# 辅助函数：获取实际的 sandboxID
+# 优先从 status.sandboxID 获取 (FastPath 创建的)，否则使用 metadata.uid (CRD 创建的 fallback)
 get_sandbox_id() {
     local ns=$1
     local sandbox_name=$2
-    kubectl get sandbox "$sandbox_name" -n "$ns" -o jsonpath='{.status.sandboxID}' 2>/dev/null
+    local sandbox_id=$(kubectl get sandbox "$sandbox_name" -n "$ns" -o jsonpath='{.status.sandboxID}' 2>/dev/null)
+    if [ -z "$sandbox_id" ]; then
+        # Fallback: 使用 UID (CRD 直接创建的 sandbox)
+        sandbox_id=$(kubectl get sandbox "$sandbox_name" -n "$ns" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+    fi
+    echo "$sandbox_id"
 }
 
 # 辅助函数：解析 sandbox 标识符（可能是 name 或实际的 sandboxID）
@@ -213,13 +219,14 @@ EOF
     rm -f "$CONFIG_FILE"
 
     if echo "$OUT" | grep -q "successfully"; then
-        SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
-        echo "  ✓ FastPath 创建成功: $SB_ID"
+        SB_NAME=$(echo "$OUT" | grep "^Name:" | awk '{print $2}')
+        SB_ID=$(echo "$OUT" | grep "^ID:" | awk '{print $2}')
+        echo "  ✓ FastPath 创建成功: name=$SB_NAME, id=$SB_ID"
 
         sleep 5  # 等待容器启动
 
-        # 获取分配的 Agent Pod
-        SB_AGENT_POD=$(kubectl get sandbox "$SB_ID" -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
+        # 获取分配的 Agent Pod (使用 sandbox_name)
+        SB_AGENT_POD=$(kubectl get sandbox "$SB_NAME" -n "$TEST_NS" -o jsonpath='{.status.assignedPod}' 2>/dev/null || echo "")
         if [ -z "$SB_AGENT_POD" ]; then
             echo "  ❌ 无法获取 Agent Pod"
             kill $PF_PID 2>/dev/null || true
@@ -232,10 +239,9 @@ EOF
         if verify_env_via_log "$SB_AGENT_POD" "$TEST_NS" "$SB_ID" "FASTPATH_VAR" "hello_from_fastpath"; then
             echo "  ✓ FastPath 环境变量正确: hello_from_fastpath"
         else
-            LOG_CONTENT=$(kubectl exec -n "$TEST_NS" "$SB_AGENT_POD" -- cat /var/log/fast-sandbox/${SB_ID}.log 2>/dev/null || echo "log not found")
             echo "  ❌ FastPath 环境变量错误. 日志内容: $LOG_CONTENT"
             kill $PF_PID 2>/dev/null || true
-            kubectl delete "$SB_ID" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+            kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             kubectl delete sandboxpool $POOL_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             return 1
         fi
@@ -247,12 +253,12 @@ EOF
         else
             echo "  ❌ FastPath 工作目录错误"
             kill $PF_PID 2>/dev/null || true
-            kubectl delete "$SB_ID" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+            kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             kubectl delete sandboxpool $POOL_1 -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
             return 1
         fi
 
-        kubectl delete sandbox "$SB_ID" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+        kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     else
         echo "  ❌ FastPath 调用失败: $OUT"
         kill $PF_PID 2>/dev/null || true

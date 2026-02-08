@@ -209,8 +209,8 @@ func (x *ListResponse) GetItems() []*SandboxInfo {
 
 type GetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	SandboxName   string                 `protobuf:"bytes,1,opt,name=sandbox_name,json=sandboxName,proto3" json:"sandbox_name,omitempty"` // CRD name (user-provided)
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // optional, default "default"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -245,9 +245,9 @@ func (*GetRequest) Descriptor() ([]byte, []int) {
 	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *GetRequest) GetSandboxId() string {
+func (x *GetRequest) GetSandboxName() string {
 	if x != nil {
-		return x.SandboxId
+		return x.SandboxName
 	}
 	return ""
 }
@@ -261,7 +261,8 @@ func (x *GetRequest) GetNamespace() string {
 
 type SandboxInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`       // container ID (md5 hash or UID)
+	SandboxName   string                 `protobuf:"bytes,8,opt,name=sandbox_name,json=sandboxName,proto3" json:"sandbox_name,omitempty"` // CRD name (user-provided)
 	Phase         string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
 	AgentPod      string                 `protobuf:"bytes,3,opt,name=agent_pod,json=agentPod,proto3" json:"agent_pod,omitempty"`
 	Endpoints     []string               `protobuf:"bytes,4,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
@@ -305,6 +306,13 @@ func (*SandboxInfo) Descriptor() ([]byte, []int) {
 func (x *SandboxInfo) GetSandboxId() string {
 	if x != nil {
 		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *SandboxInfo) GetSandboxName() string {
+	if x != nil {
+		return x.SandboxName
 	}
 	return ""
 }
@@ -469,7 +477,8 @@ func (x *CreateRequest) GetWorkingDir() string {
 
 type CreateResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`       // container ID (md5 hash or UID)
+	SandboxName   string                 `protobuf:"bytes,4,opt,name=sandbox_name,json=sandboxName,proto3" json:"sandbox_name,omitempty"` // CRD name (user-provided)
 	AgentPod      string                 `protobuf:"bytes,2,opt,name=agent_pod,json=agentPod,proto3" json:"agent_pod,omitempty"`
 	Endpoints     []string               `protobuf:"bytes,3,rep,name=endpoints,proto3" json:"endpoints,omitempty"` // IP:Port 列表
 	unknownFields protoimpl.UnknownFields
@@ -513,6 +522,13 @@ func (x *CreateResponse) GetSandboxId() string {
 	return ""
 }
 
+func (x *CreateResponse) GetSandboxName() string {
+	if x != nil {
+		return x.SandboxName
+	}
+	return ""
+}
+
 func (x *CreateResponse) GetAgentPod() string {
 	if x != nil {
 		return x.AgentPod
@@ -529,8 +545,8 @@ func (x *CreateResponse) GetEndpoints() []string {
 
 type DeleteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"` // 可选，默认为 "default"
+	SandboxName   string                 `protobuf:"bytes,1,opt,name=sandbox_name,json=sandboxName,proto3" json:"sandbox_name,omitempty"` // CRD name (user-provided)
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 可选，默认为 "default"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -565,9 +581,9 @@ func (*DeleteRequest) Descriptor() ([]byte, []int) {
 	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *DeleteRequest) GetSandboxId() string {
+func (x *DeleteRequest) GetSandboxName() string {
 	if x != nil {
-		return x.SandboxId
+		return x.SandboxName
 	}
 	return ""
 }
@@ -624,9 +640,9 @@ func (x *DeleteResponse) GetSuccess() bool {
 }
 
 type UpdateRequest struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	Namespace string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	SandboxName string                 `protobuf:"bytes,1,opt,name=sandbox_name,json=sandboxName,proto3" json:"sandbox_name,omitempty"` // CRD name (user-provided)
+	Namespace   string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// 可更新字段 (only one at a time, except labels)
 	//
 	// Types that are valid to be assigned to Update:
@@ -672,9 +688,9 @@ func (*UpdateRequest) Descriptor() ([]byte, []int) {
 	return file_api_proto_v1_fastpath_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *UpdateRequest) GetSandboxId() string {
+func (x *UpdateRequest) GetSandboxName() string {
 	if x != nil {
-		return x.SandboxId
+		return x.SandboxName
 	}
 	return ""
 }
@@ -832,15 +848,15 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"\vListRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\">\n" +
 	"\fListResponse\x12.\n" +
-	"\x05items\x18\x01 \x03(\v2\x18.fastpath.v1.SandboxInfoR\x05items\"I\n" +
+	"\x05items\x18\x01 \x03(\v2\x18.fastpath.v1.SandboxInfoR\x05items\"M\n" +
 	"\n" +
-	"GetRequest\x12\x1d\n" +
-	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"\xcd\x01\n" +
+	"GetRequest\x12!\n" +
+	"\fsandbox_name\x18\x01 \x01(\tR\vsandboxName\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"\xf0\x01\n" +
 	"\vSandboxInfo\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x14\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12!\n" +
+	"\fsandbox_name\x18\b \x01(\tR\vsandboxName\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x1b\n" +
 	"\tagent_pod\x18\x03 \x01(\tR\bagentPod\x12\x1c\n" +
 	"\tendpoints\x18\x04 \x03(\tR\tendpoints\x12\x1d\n" +
@@ -863,21 +879,20 @@ const file_api_proto_v1_fastpath_proto_rawDesc = "" +
 	"workingDir\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"j\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8d\x01\n" +
 	"\x0eCreateResponse\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1b\n" +
+	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12!\n" +
+	"\fsandbox_name\x18\x04 \x01(\tR\vsandboxName\x12\x1b\n" +
 	"\tagent_pod\x18\x02 \x01(\tR\bagentPod\x12\x1c\n" +
-	"\tendpoints\x18\x03 \x03(\tR\tendpoints\"L\n" +
-	"\rDeleteRequest\x12\x1d\n" +
-	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
+	"\tendpoints\x18\x03 \x03(\tR\tendpoints\"P\n" +
+	"\rDeleteRequest\x12!\n" +
+	"\fsandbox_name\x18\x01 \x01(\tR\vsandboxName\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"*\n" +
 	"\x0eDeleteResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xad\x03\n" +
-	"\rUpdateRequest\x12\x1d\n" +
-	"\n" +
-	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x1c\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xb1\x03\n" +
+	"\rUpdateRequest\x12!\n" +
+	"\fsandbox_name\x18\x01 \x01(\tR\vsandboxName\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x120\n" +
 	"\x13expire_time_seconds\x18\x03 \x01(\x03H\x00R\x11expireTimeSeconds\x12'\n" +
 	"\x0ereset_revision\x18\x04 \x01(\tH\x00R\rresetRevision\x12C\n" +

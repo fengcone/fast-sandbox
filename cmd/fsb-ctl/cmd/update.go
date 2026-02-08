@@ -23,7 +23,7 @@ var (
 
 // updateCmd represents the update command
 var updateCmd = &cobra.Command{
-	Use:   "update <sandbox-id>",
+	Use:   "update <sandbox-name>",
 	Short: "Update sandbox configuration",
 	Long: `Update sandbox properties such as expire time, failure policy, or labels.
 
@@ -44,9 +44,9 @@ Examples:
   fsb-ctl update my-sandbox --recovery-timeout 120`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		sandboxID := args[0]
+		sandboxName := args[0]
 		namespace := viper.GetString("namespace")
-		klog.V(4).InfoS("CLI update command started", "sandboxId", sandboxID, "namespace", namespace)
+		klog.V(4).InfoS("CLI update command started", "sandboxName", sandboxName, "namespace", namespace)
 
 		client, conn := getClient()
 		if conn != nil {
@@ -54,9 +54,9 @@ Examples:
 		}
 
 		req := &fastpathv1.UpdateRequest{
-			SandboxId: sandboxID,
-			Namespace: namespace,
-			Labels:    make(map[string]string),
+			SandboxName: sandboxName,
+			Namespace:   namespace,
+			Labels:      make(map[string]string),
 		}
 
 		if cmd.Flags().Changed("expire-time") {
@@ -65,7 +65,7 @@ Examples:
 				klog.ErrorS(err, "Invalid expire-time value", "expireTime", updateExpireTime)
 				log.Fatalf("Error: invalid expire-time: %v", err)
 			}
-			klog.V(4).InfoS("Updating expire-time", "sandboxId", sandboxID, "expireTime", seconds)
+			klog.V(4).InfoS("Updating expire-time", "sandboxName", sandboxName, "expireTime", seconds)
 			req.Update = &fastpathv1.UpdateRequest_ExpireTimeSeconds{
 				ExpireTimeSeconds: seconds,
 			}
@@ -77,21 +77,21 @@ Examples:
 				klog.ErrorS(err, "Invalid failure-policy value", "failurePolicy", updateFailurePolicy)
 				log.Fatalf("Error: invalid failure-policy: %v", err)
 			}
-			klog.V(4).InfoS("Updating failure-policy", "sandboxId", sandboxID, "failurePolicy", policy)
+			klog.V(4).InfoS("Updating failure-policy", "sandboxName", sandboxName, "failurePolicy", policy)
 			req.Update = &fastpathv1.UpdateRequest_FailurePolicy{
 				FailurePolicy: policy,
 			}
 		}
 
 		if cmd.Flags().Changed("recovery-timeout") {
-			klog.V(4).InfoS("Updating recovery-timeout", "sandboxId", sandboxID, "recoveryTimeout", updateRecoveryTimeout)
+			klog.V(4).InfoS("Updating recovery-timeout", "sandboxName", sandboxName, "recoveryTimeout", updateRecoveryTimeout)
 			req.Update = &fastpathv1.UpdateRequest_RecoveryTimeoutSeconds{
 				RecoveryTimeoutSeconds: updateRecoveryTimeout,
 			}
 		}
 
 		if len(updateLabels) > 0 {
-			klog.V(4).InfoS("Updating labels", "sandboxId", sandboxID, "labels", updateLabels)
+			klog.V(4).InfoS("Updating labels", "sandboxName", sandboxName, "labels", updateLabels)
 			for _, label := range updateLabels {
 				parts := strings.SplitN(label, "=", 2)
 				if len(parts) != 2 {
@@ -107,20 +107,20 @@ Examples:
 			log.Fatal("Error: at least one update field must be specified (--expire-time, --failure-policy, --recovery-timeout, or --labels)")
 		}
 
-		klog.V(4).InfoS("Sending UpdateSandbox request", "sandboxId", sandboxID)
+		klog.V(4).InfoS("Sending UpdateSandbox request", "sandboxName", sandboxName)
 		resp, err := client.UpdateSandbox(context.Background(), req)
 		if err != nil {
-			klog.ErrorS(err, "UpdateSandbox request failed", "sandboxId", sandboxID)
+			klog.ErrorS(err, "UpdateSandbox request failed", "sandboxName", sandboxName)
 			log.Fatalf("Error: %v", err)
 		}
 
 		if !resp.Success {
-			klog.ErrorS(nil, "UpdateSandbox request returned failure", "sandboxId", sandboxID, "message", resp.Message)
+			klog.ErrorS(nil, "UpdateSandbox request returned failure", "sandboxName", sandboxName, "message", resp.Message)
 			log.Fatalf("Error: %s", resp.Message)
 		}
 
-		klog.V(4).InfoS("UpdateSandbox request succeeded", "sandboxId", sandboxID)
-		fmt.Printf("✓ Sandbox %s updated successfully\n", sandboxID)
+		klog.V(4).InfoS("UpdateSandbox request succeeded", "sandboxName", sandboxName)
+		fmt.Printf("✓ Sandbox %s updated successfully\n", sandboxName)
 		if resp.Sandbox != nil {
 			fmt.Printf("  Phase: %s\n", resp.Sandbox.Phase)
 			fmt.Printf("  Agent: %s\n", resp.Sandbox.AgentPod)

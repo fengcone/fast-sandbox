@@ -9,6 +9,14 @@ run() {
     pkill -f "kubectl port-forward" || true
 
     CLIENT_BIN="$ROOT_DIR/bin/fsb-ctl"
+    TEST_NS=${TEST_NS:-"e2e-cli-test-$RANDOM"}
+
+    # 创建测试 namespace
+    kubectl create namespace "$TEST_NS" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+
+    # 获取 Controller 命名空间
+    CTRL_NS=$(kubectl get deployment fast-sandbox-controller -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "default")
+
     if [ ! -f "$CLIENT_BIN" ]; then
         echo "  编译 fsb-ctl..."
         cd "$ROOT_DIR" && go build -o bin/fsb-ctl ./cmd/fsb-ctl && cd - >/dev/null
@@ -66,6 +74,14 @@ EOF
         echo "  ❌ 沙箱创建失败: $OUT"
         return 1
     fi
+
+    # 解析 sandbox_id (ID) 和 sandbox_name (Name) 从输出中
+    SB_ID=$(echo "$OUT" | grep "^ID:" | awk '{print $2}')
+    if [ -z "$SB_ID" ]; then
+        echo "  ❌ 无法解析 sandbox ID: $OUT"
+        return 1
+    fi
+    echo "  Sandbox Name: $SB_NAME, ID: $SB_ID"
 
     # 2. 获取 Agent Pod 并建立转发 (使用动态端口)
     # 等待 Sandbox 分配完成并稳定
@@ -134,9 +150,9 @@ EOF
         return 1
     fi
 
-    # 3. 使用 curl 验证 Agent API
+    # 3. 使用 curl 验证 Agent API (使用实际的 sandboxId)
     echo "  验证 Agent HTTP API..."
-    CURL_OUT=$(curl -s --max-time 5 "http://localhost:$PF_PORT/api/v1/agent/logs?sandboxId=$SB_NAME")
+    CURL_OUT=$(curl -s --max-time 5 "http://localhost:$PF_PORT/api/v1/agent/logs?sandboxId=$SB_ID")
     if echo "$CURL_OUT" | grep -q "Log-Line-1"; then
         echo "  ✓ Curl 获取日志成功"
     else
@@ -160,7 +176,9 @@ EOF
 
     # 清理
     cleanup_port_forward "$CTRL_PF_PID"
+    kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandboxpool "$POOL" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete namespace "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     return 0
 }
 

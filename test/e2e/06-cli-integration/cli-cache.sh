@@ -26,6 +26,10 @@ cleanup_port_forward() {
 run() {
     CLIENT_BIN="$ROOT_DIR/bin/fsb-ctl"
     CACHE_DIR="$HOME/.fsb-ctl/cache"
+    TEST_NS=${TEST_NS:-"e2e-cli-test-$RANDOM"}
+
+    # 创建测试 namespace
+    kubectl create namespace "$TEST_NS" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
 
     # 编译 fsb-ctl
     if [ ! -f "$CLIENT_BIN" ]; then
@@ -160,6 +164,7 @@ EOF
     kubectl delete sandbox "$SB_NAME" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandbox "$SB_NAME2" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandboxpool "$POOL" -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete namespace "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     # 清理测试缓存目录
     rm -rf "$CACHE_DIR"

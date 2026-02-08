@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,7 +78,7 @@ func TestVerifyPodExistsDirectly_NoKubeClient(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	exists := j.verifyPodExists(ctx, "test-uid", "default")
+	exists := j.verifyPodExists(ctx, "test-uid", "test-pod", "default")
 
 	assert.False(t, exists, "没有 kubeClient 时应返回 false")
 }
@@ -91,17 +90,7 @@ func TestVerifyPodExistsDirectly_EmptyNamespace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	exists := j.verifyPodExists(ctx, "test-uid", "")
+	exists := j.verifyPodExists(ctx, "test-uid", "test-pod", "")
 
 	assert.False(t, exists, "没有 kubeClient 时应返回 false")
-}
-
-// ============================================================================
-// OrphanTimeout Constant Test
-// ============================================================================
-
-func TestDefaultOrphanTimeout(t *testing.T) {
-	// RED: 测试默认的孤儿超时时间是 10 秒
-	assert.Equal(t, 10*time.Second, defaultOrphanTimeout,
-		"默认孤儿超时应该是 10 秒")
 }

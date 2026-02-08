@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"k8s.io/klog/v2"
 	"gopkg.in/yaml.v3"
+	"k8s.io/klog/v2"
 )
 
 // SandboxConfig for yaml
@@ -134,8 +134,9 @@ Priority: Flags > Config File > Interactive Input
 			log.Fatalf("Error: %v", err)
 		}
 
-		klog.V(4).InfoS("Sandbox created successfully", "name", name, "sandboxId", resp.SandboxId, "agent", resp.AgentPod, "duration", time.Since(start))
+		klog.V(4).InfoS("Sandbox created successfully", "name", name, "sandboxId", resp.SandboxId, "sandboxName", resp.SandboxName, "agent", resp.AgentPod, "duration", time.Since(start))
 		fmt.Printf("🎉 Sandbox created successfully in %v\n", time.Since(start))
+		fmt.Printf("Name:      %s\n", resp.SandboxName)
 		fmt.Printf("ID:        %s\n", resp.SandboxId)
 		fmt.Printf("Agent:     %s\n", resp.AgentPod)
 		fmt.Printf("Endpoints: %v\n", resp.Endpoints)

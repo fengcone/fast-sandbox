@@ -7,11 +7,12 @@ import (
 	"time"
 
 	apiv1alpha1 "fast-sandbox/api/v1alpha1"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/labels"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -183,7 +184,7 @@ func TestScan_WithTimeout(t *testing.T) {
 		createdAt time.Time
 	}{
 		id:        "old-container",
-		createdAt: time.Now().Add(-15 * time.Second), // 超过默认 10s
+		createdAt: time.Now().Add(-35 * time.Second), // 超过默认 30s
 	}
 
 	newContainer := struct {

@@ -5,7 +5,16 @@ describe() {
     echo "Fast-Path 一致性模式 - 验证 Fast/Strong 两种模式、孤儿清理及端口隔离"
 }
 
+cleanup_webhook() {
+    if [ -f "$SCRIPT_DIR/scripts/cleanup_webhook.sh" ]; then
+        echo "  清理 webhook..."
+        bash "$SCRIPT_DIR/scripts/cleanup_webhook.sh" >/dev/null 2>&1 || true
+    fi
+}
+
 run() {
+    trap cleanup_webhook EXIT INT TERM
+    cleanup_webhook
     CLIENT_BIN="$ROOT_DIR/bin/fsb-ctl"
     if [ ! -f "$CLIENT_BIN" ]; then
         echo "  编译官方 CLI 工具..."
@@ -56,11 +65,13 @@ EOF
     # 使用新参数 --name，添加默认命令 /bin/sleep 3600
     OUT=$("$CLIENT_BIN" run "sb-fast-$RANDOM" --image="$IMAGE" --pool="$POOL_1" --ports=5758 --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
-        SB_B=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
-        echo "  ✓ Fast-Path 创建成功: $SB_B"
-        
-        # 验证 List 功能
-        if "$CLIENT_BIN" list --namespace="$TEST_NS" | grep -q "$SB_B"; then
+        SB_NAME=$(echo "$OUT" | grep "^Name:" | awk '{print $2}')
+        SB_ID=$(echo "$OUT" | grep "^ID:" | awk '{print $2}')
+        echo "  ✓ Fast-Path 创建成功: name=$SB_NAME, id=$SB_ID"
+
+        sleep 5
+        # 验证 List 功能 (使用 sandbox_name)
+        if "$CLIENT_BIN" list --namespace="$TEST_NS" | grep -q "$SB_NAME"; then
             echo "  ✓ Sandbox 在 list 中显示"
         else
             echo "  ❌ Sandbox 未在 list 中显示"; kill $PF_PID; return 1
@@ -104,9 +115,12 @@ EOF
     echo "  通过 Fast-Path (Strong 模式) 创建 Sandbox..."
     OUT=$("$CLIENT_BIN" run "sb-strong-$RANDOM" --image="$IMAGE" --pool="$POOL_2" --mode=strong --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
     if echo "$OUT" | grep -q "successfully"; then
-        SB_ID=$(echo "$OUT" | grep "ID:" | awk '{print $2}')
+        SB_NAME=$(echo "$OUT" | grep "^Name:" | awk '{print $2}')
+        SB_ID=$(echo "$OUT" | grep "^ID:" | awk '{print $2}')
+        echo "  ✓ Strong 模式创建成功: name=$SB_NAME, id=$SB_ID"
         sleep 5
-        PHASE=$(kubectl get sandbox "$SB_ID" -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        # 使用 sandbox_name 进行 kubectl 查询
+        PHASE=$(kubectl get sandbox "$SB_NAME" -n "$TEST_NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
         if [ "$PHASE" = "Bound" ] || [ "$PHASE" = "Running" ] || [ "$PHASE" = "Pending" ]; then
             echo "  ✓ Strong 模式状态正确: $PHASE"
         else
@@ -127,7 +141,7 @@ EOF
         echo "  部署故障注入 Webhook..."
         export TEST_NS
         bash "$SCRIPT_DIR/scripts/setup_webhook.sh"
-        
+
         cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
 kind: SandboxPool
@@ -151,17 +165,22 @@ EOF
         echo "  创建故意失败的沙箱: $ORPHAN_NAME"
         # 使用 --name 指定特定名称，添加默认命令
         OUT=$("$CLIENT_BIN" run "$ORPHAN_NAME" --image="$IMAGE" --pool="$POOL_3" --namespace="$TEST_NS" /bin/sleep 3600 2>&1)
-        
+
         if echo "$OUT" | grep -q "successfully"; then
             echo "  ✓ Fast-Path 调用成功 (正如预期)"
             NODE_NAME=$(kubectl get pod -l fast-sandbox.io/pool=$POOL_3 -n "$TEST_NS" -o jsonpath='{.items[0].spec.nodeName}')
-            CONTAINER_ID=$(docker exec "$NODE_NAME" ctr -n k8s.io containers ls | grep "$ORPHAN_NAME" | awk '{print $1}')
+            echo "  节点名称: $NODE_NAME"
+            FILTER="labels.\"fast-sandbox.io/sandbox-name\"==\"$ORPHAN_NAME\""
+            CONTAINER_ID=$(docker exec "$NODE_NAME" ctr -n k8s.io containers ls "$FILTER" 2>/dev/null | awk 'NR==2{print $1}')
+            echo "  容器 ID: $CONTAINER_ID"
             if [ -n "$CONTAINER_ID" ]; then
                 echo "  ✓ 发现孤儿容器: $CONTAINER_ID"
                 echo "  等待 Janitor 扫描清理..."
                 local found=0
-                for i in {1..25}; do
-                    if ! docker exec "$NODE_NAME" ctr -n k8s.io containers ls | grep -q "$CONTAINER_ID"; then
+                for i in {1..10}; do
+                    # 检查容器是否还存在
+                    CHECK=$(docker exec "$NODE_NAME" ctr -n k8s.io containers ls -q 2>/dev/null | grep "$CONTAINER_ID" || echo "")
+                    if [ -z "$CHECK" ]; then
                         echo "  🎉 SUCCESS: Janitor 清理了孤儿容器!"
                         found=1; break
                     fi
@@ -176,7 +195,6 @@ EOF
             echo "  ❌ Fast-Path 调用报错: $OUT"; kill $PF_PID; return 1
         fi
         kill $PF_PID 2>/dev/null || true
-        bash "$SCRIPT_DIR/scripts/cleanup_webhook.sh"
     fi
 
     return 0

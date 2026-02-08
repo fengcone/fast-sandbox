@@ -5,6 +5,11 @@ describe() {
 }
 
 run() {
+    TEST_NS=${TEST_NS:-"e2e-cli-test-$RANDOM"}
+
+    # 创建测试 namespace
+    kubectl create namespace "$TEST_NS" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+
     # 创建测试 Pool
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
@@ -118,6 +123,7 @@ EOF
     kill $PF_PID 2>/dev/null
     kubectl delete sandbox sb-update -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
     kubectl delete sandboxpool update-pool -n "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
+    kubectl delete namespace "$TEST_NS" --ignore-not-found=true >/dev/null 2>&1
 
     return 0
 }

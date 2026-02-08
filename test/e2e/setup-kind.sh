@@ -96,7 +96,7 @@ fi
 
 if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "创建 KIND 集群: $CLUSTER_NAME"
-    kind create cluster --name "$CLUSTER_NAME" --image kindest/node:v1.35.0
+    kind create cluster --name "$CLUSTER_NAME" --image kindest/node:v1.27.3
     echo "等待节点就绪..."
     kubectl wait --for=condition=Ready node/"$CLUSTER_NAME-control-plane" --timeout=120s
 fi

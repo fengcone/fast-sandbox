@@ -105,7 +105,15 @@ EOF
     # Sub-case 2: Expired 后删除
     # ========================================
     echo "  === 测试 2: Expired 后删除 ==="
-    EXPIRE_TIME=$(date -u -d "+15 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+15S +"%Y-%m-%dT%H:%M:%SZ")
+    # 兼容 macOS 和 Linux 的 date 命令
+    if date -d "+15 seconds" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+        EXPIRE_TIME=$(date -u -d "+15 seconds" +"%Y-%m-%dT%H:%M:%SZ")
+    elif date -v+15S +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+        EXPIRE_TIME=$(date -u -v+15S +"%Y-%m-%dT%H:%M:%SZ")
+    else
+        # 回退: 使用 Python (如果有)
+        EXPIRE_TIME=$(python3 -c "from datetime import datetime, timedelta; print((datetime.utcnow() + timedelta(seconds=15)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+    fi
 
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1
@@ -284,7 +292,14 @@ EOF
     # ========================================
     echo "  === 测试 6: 过期自动清理 ==="
 
-    EXPIRE_TIME=$(date -u -d "+10 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+10S +"%Y-%m-%dT%H:%M:%SZ")
+    # 兼容 macOS 和 Linux 的 date 命令
+    if date -d "+10 seconds" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+        EXPIRE_TIME=$(date -u -d "+10 seconds" +"%Y-%m-%dT%H:%M:%SZ")
+    elif date -v+10S +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+        EXPIRE_TIME=$(date -u -v+10S +"%Y-%m-%dT%H:%M:%SZ")
+    else
+        EXPIRE_TIME=$(python3 -c "from datetime import datetime, timedelta; print((datetime.utcnow() + timedelta(seconds=10)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+    fi
 
     cat <<EOF | kubectl apply -f - -n "$TEST_NS" >/dev/null 2>&1
 apiVersion: sandbox.fast.io/v1alpha1

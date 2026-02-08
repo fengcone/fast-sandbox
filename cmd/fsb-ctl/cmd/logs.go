@@ -38,8 +38,8 @@ var logsCmd = &cobra.Command{
 
 		klog.V(4).InfoS("Getting sandbox info for logs", "name", name)
 		info, err := client.GetSandbox(context.Background(), &fastpathv1.GetRequest{
-			SandboxId: name,
-			Namespace: namespace,
+			SandboxName: name,
+			Namespace:   namespace,
 		})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get sandbox info", "name", name)

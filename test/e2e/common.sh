@@ -10,7 +10,7 @@ AGENT_IMAGE="fast-sandbox/agent:dev"
 JANITOR_IMAGE="fast-sandbox/janitor:dev"
 
 # 环境变量支持
-export SKIP_BUILD=${SKIP_BUILD:-""}
+export SKIP_BUILD=${SKIP_BUILD:-"true"}
 export FORCE_RECREATE_CLUSTER=${FORCE_RECREATE_CLUSTER:-"false"}
 
 # --- 0. 集群管理 (强制重建模式) ---
@@ -18,8 +18,7 @@ function ensure_cluster() {
     if [ "$FORCE_RECREATE_CLUSTER" = "true" ]; then
         echo "⚠️ [FORCE_RECREATE_CLUSTER] 正在物理销毁并重建 KIND 集群: $CLUSTER_NAME"
         kind delete cluster --name "$CLUSTER_NAME" || true
-        # 强制使用本地镜像，避免 pull 失败
-        kind create cluster --name "$CLUSTER_NAME" --image kindest/node:v1.35.0
+        kind create cluster --name "$CLUSTER_NAME" --image kindest/node:v1.27.3
         echo "等待节点就绪..."
         kubectl wait --for=condition=Ready node/"$CLUSTER_NAME-control-plane" --timeout=60s
     fi
@@ -63,7 +62,7 @@ function setup_env() {
     else
         echo "Image alpine:latest found locally, skipping pull."
     fi
-    kind load docker-image alpine:latest --name "$CLUSTER_NAME" >/dev/null 2>&1
+    kind load docker-image alpine:latest --name "$CLUSTER_NAME"
 
     for comp in $components; do
         if [ "$SKIP_BUILD" != "true" ]; then
