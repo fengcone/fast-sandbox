@@ -195,6 +195,7 @@ EOF
             echo "  ❌ Fast-Path 调用报错: $OUT"; kill $PF_PID; return 1
         fi
         kill $PF_PID 2>/dev/null || true
+        cleanup_webhook
     fi
 
     return 0

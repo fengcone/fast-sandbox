@@ -191,18 +191,18 @@ go tool pprof -http=:8080 cpu.prof
 
 ## 开发计划
 
-- [X]  **Phase 1**: 核心 Runtime (Containerd) 与 gRPC 框架
-- [X]  **Phase 2**: Fast-Path API 与 Registry 调度
-- [X]  **Phase 3**: CLI (`fsb-ctl`) 与交互式体验
-- [X]  **Phase 4**: 日志流式传输与自动隧道
-- [X]  **Phase 5**: 统一日志框架 (klog)
-- [X]  **Phase 6**: 性能指标与单元测试
-- [ ]  phase 7: 支持自定义挂载 Volumes
-- [ ]  **Phase 8**: 容器热迁移 (Checkpoint/Restore)
-- [ ]  **Phase 9**: Web 控制台与流量代理
-- [ ]  **Phase 10**: gVisor 容器支持
-- [ ]  **Phase 11**: CLI exec bash 与 Python SDK
-- [ ]  **Phase 11**: GPU 容器支持
+- [x] **Phase 1**: 核心 Runtime (Containerd) 与 gRPC 框架
+- [x] **Phase 2**: Fast-Path API 与 Registry 调度
+- [x] **Phase 3**: CLI (`fsb-ctl`) 与交互式体验
+- [x] **Phase 4**: 日志流式传输与自动隧道
+- [x] **Phase 5**: 统一日志框架 (klog)
+- [x] **Phase 6**: 性能指标与单元测试
+- [ ] **Phase 7**: 支持自定义卷挂载 (Custom Volume Mounting)
+- [ ] **Phase 8**: 容器检查点/恢复 (Checkpoint/Restore with CRIU)
+- [ ] **Phase 9**: Web 控制台与流量代理
+- [ ] **Phase 10**: gVisor 安全沙箱支持
+- [ ] **Phase 11**: CLI exec bash 与 Python SDK (类似 Modal)
+- [ ] **Phase 12**: GPU 容器支持
 
 ## 许可证
 

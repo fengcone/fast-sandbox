@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fastpathv1 "fast-sandbox/api/proto/v1"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"k8s.io/klog/v2"
@@ -38,10 +39,10 @@ var listCmd = &cobra.Command{
 
 		klog.V(4).InfoS("ListSandboxes request succeeded", "namespace", namespace, "count", len(resp.Items))
 		w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tPHASE\tIMAGE\tAGENT\tAGE")
+		fmt.Fprintln(w, "NAME\tID\tPHASE\tIMAGE\tAGENT\tAGE")
 		for _, item := range resp.Items {
 			age := time.Since(time.Unix(item.CreatedAt, 0)).Truncate(time.Second)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", item.SandboxId, item.Phase, item.Image, item.AgentPod, age)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", item.SandboxName, item.SandboxId, item.Phase, item.Image, item.AgentPod, age)
 		}
 		w.Flush()
 	},
