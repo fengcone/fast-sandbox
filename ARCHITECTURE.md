@@ -241,7 +241,27 @@ spec:
   expireTimeSeconds: int64   # Optional expiration
 ```
 
-## 6. Logging
+## 6. Horizontal Scaling Considerations
+
+### Current Limitation
+
+The Fast-Path gRPC service runs on the Controller with an in-memory Registry, which must be a singleton to avoid allocation conflicts. This limits horizontal scalability.
+
+### Considered Approaches
+
+We have explored two architectural approaches for multi-replica deployment:
+
+1. **Leader-Follower with Read-Write Separation**: One Leader handles CreateSandbox (requires Registry), Followers handle read operations and forward CreateSandbox to Leader. See [Leader-Follower HA Design](docs/plans/2025-02-09-leader-follower-ha-design.md).
+
+2. **Controller Sharding with Client-Side Routing**: Each Pool is bound to a specific Controller, clients maintain a routing table. See [Controller Sharding Design](docs/plans/2025-02-09-controller-sharding-design.md).
+
+### Recommendation
+
+For large-scale production deployments requiring horizontal scalability, we recommend **application-level sharding** (e.g., separate Controller deployments per team/environment) rather than implementing complex intra-cluster sharding. This keeps the architecture simple while providing isolation.
+
+---
+
+## 7. Logging
 
 Fast Sandbox uses [klog](https://github.com/kubernetes/klog), the Kubernetes ecosystem's standard logging library.
 

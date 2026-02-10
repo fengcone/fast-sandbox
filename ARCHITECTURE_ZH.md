@@ -241,7 +241,27 @@ spec:
   expireTimeSeconds: int64   # 可选的过期时间
 ```
 
-## 6. 日志
+## 6. 水平扩展考虑
+
+### 当前限制
+
+Fast-Path gRPC 服务运行在 Controller 上，使用内存态 Registry，必须单点运行以避免分配冲突。这限制了水平扩展能力。
+
+### 已探索的方案
+
+我们探索了两种多副本部署的架构方案：
+
+1. **Leader-Follower 读写分离**：一个 Leader 处理 CreateSandbox（需要 Registry），Follower 处理读操作并将 CreateSandbox 转发给 Leader。详见 [Leader-Follower 高可用设计](docs/plans/2025-02-09-leader-follower-ha-design.md)。
+
+2. **Controller 分片 + 客户端路由**：每个 Pool 绑定到特定的 Controller，客户端维护路由表。详见 [Controller 分片设计](docs/plans/2025-02-09-controller-sharding-design.md)。
+
+### 建议
+
+对于需要大规模水平扩展的生产环境，我们推荐**应用层分片**（如按团队/环境部署独立的 Controller），而不是实现复杂的集群内分片。这样可以保持架构简洁，同时提供隔离性。
+
+---
+
+## 7. 日志
 
 Fast Sandbox 使用 [klog](https://github.com/kubernetes/klog)，这是 Kubernetes 生态系统的标准日志库。
 
