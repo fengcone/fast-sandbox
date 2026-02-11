@@ -46,30 +46,67 @@ function cleanup_test_resources() {
     kubectl delete sandboxpool --all --all-namespaces --force --grace-period=0 --ignore-not-found=true 2>/dev/null || true
 }
 
+# --- 1.5 环境检测 ---
+function detect_runtime() {
+    # 检测当前容器运行时
+    if docker info >/dev/null 2>&1; then
+        RUNTIME="docker"
+        echo "→ 运行时: Docker"
+    elif [ -S /run/containerd/containerd.sock ]; then
+        RUNTIME="containerd"
+        export USE_CONTAINERD_RUNTIME=true
+        echo "→ 运行时: Containerd (无 systemd 环境)"
+    else
+        echo "❌ 错误: 无法检测到可用容器运行时"
+        exit 1
+    fi
+}
+
 # --- 2. 环境初始化 (构建与导入) ---
 function setup_env() {
-    local components=$1 
+    local components=$1
     echo "=== [Setup] Building and Loading Images: $components ==="
-    
+
+    detect_runtime
+
     # 确保集群存在
     ensure_cluster
 
     cd "$ROOT_DIR"
+
     # 预拉取基础镜像以防 InitContainer 失败
-    if ! docker image inspect alpine:latest >/dev/null 2>&1; then
-        echo "Pulling alpine:latest..."
-        docker pull alpine:latest || true
+    if [ "$RUNTIME" = "docker" ]; then
+        if ! docker image inspect alpine:latest >/dev/null 2>&1; then
+            echo "Pulling alpine:latest..."
+            docker pull alpine:latest || true
+        else
+            echo "Image alpine:latest found locally, skipping pull."
+        fi
+        kind load docker-image alpine:latest --name "$CLUSTER_NAME"
     else
-        echo "Image alpine:latest found locally, skipping pull."
+        # containerd 模式
+        echo "使用 ctr 拉取 alpine:latest..."
+        ctr -n k8s.io images pull docker.io/library/alpine:latest 2>/dev/null || echo "⚠️  拉取失败，继续..."
+        ctr -n k8s.io images tag docker.io/library/alpine:latest alpine:latest 2>/dev/null || true
+        kind load docker-image alpine:latest --name "$CLUSTER_NAME" 2>/dev/null || echo "⚠️  加载失败"
     fi
-    kind load docker-image alpine:latest --name "$CLUSTER_NAME"
 
     for comp in $components; do
         if [ "$SKIP_BUILD" != "true" ]; then
             make "docker-$comp"
         fi
+
         echo "Loading image fast-sandbox/$comp:dev into $CLUSTER_NAME..."
-        kind load docker-image "fast-sandbox/$comp:dev" --name "$CLUSTER_NAME"
+        if [ "$RUNTIME" = "docker" ]; then
+            kind load docker-image "fast-sandbox/$comp:dev" --name "$CLUSTER_NAME"
+        else
+            if command -v docker >/dev/null 2>&1; then
+                kind load docker-image "fast-sandbox/$comp:dev" --name "$CLUSTER_NAME"
+            else
+                echo "⚠️  Docker 不可用，无法加载镜像到 Kind"
+                echo "⚠️  请确保节点可访问镜像仓库: fast-sandbox/$comp:dev"
+            fi
+        fi
     done
 }
 
