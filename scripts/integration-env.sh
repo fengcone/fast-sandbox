@@ -245,7 +245,11 @@ on_error() { # task
 }
 
 failure_dump() { # task
-	local task="$1" dump="$LOGS_DIR/failure-$task-$(date +%s).txt"
+	# Separate declarations: bash expands every word of a `local` command
+	# before assigning, so referencing $task in the same statement would be an
+	# unbound variable under set -u (the dump would die instead of dumping).
+	local task="$1"
+	local dump="$LOGS_DIR/failure-$task-$(date +%s).txt"
 	mkdir -p "$LOGS_DIR"
 	{
 		echo "=== integration-env failure: $task ($(date -u +%FT%TZ)) ==="
@@ -470,11 +474,13 @@ stateroot_xfs_up() {
 	sudo_ mkdir -p "$XFS_MOUNT_POINT"
 	sudo_ mount -o noatime "$XFS_LOOP_FILE" "$XFS_MOUNT_POINT" \
 		|| die "mount $XFS_LOOP_FILE at $XFS_MOUNT_POINT failed (loop support? try XFS_STATEROOT=0)"
-	# probe: reflink must actually work on the resulting filesystem.
+	# probe: reflink must actually work on the resulting filesystem. The
+	# fresh mount is root-owned, so the probe file is written through sudo_
+	# as well (a non-root runner cannot write it directly).
 	local a b
 	a="$XFS_MOUNT_POINT/.reflink-a"
 	b="$XFS_MOUNT_POINT/.reflink-b"
-	printf 'probe' > "$a"
+	printf 'probe' | sudo_ tee "$a" >/dev/null
 	if sudo_ cp --reflink=always "$a" "$b"; then
 		sudo_ rm -f "$a" "$b"
 		pass "XFS StateRoot ready (reflink CoW rootfs)"
@@ -502,7 +508,10 @@ build_images() {
 	(cd "$REPO_ROOT" && make images COMPONENT=janitor >/dev/null)
 	(cd "$REPO_ROOT" && make images COMPONENT=firecracker-runtime-agent >/dev/null)
 	log "building sandboxtemplate-builder image"
-	docker build --quiet -t "$IMG_BUILDER" \
+	# DOCKER_BUILD_FLAGS is the same knob `make images` exposes (e.g.
+	# --build-arg GOPROXY=... on hosts without direct module access).
+	# shellcheck disable=SC2086
+	docker build ${DOCKER_BUILD_FLAGS:-} --quiet -t "$IMG_BUILDER" \
 		-f "$REPO_ROOT/build/Dockerfile.sandboxtemplate-builder" "$REPO_ROOT" >/dev/null
 	log "building fastctl (host CLI)"
 	mkdir -p "$WORK/bin"
@@ -707,7 +716,10 @@ kind_up() {
 # --- task 3: MinIO + credentials -------------------------------------------------------
 minio_up() {
 	docker rm -f "$MINIO_CONTAINER" >/dev/null 2>&1 || true
-	rm -rf "$MINIO_DATA"
+	# The MinIO container writes its object store as root, so a previous
+	# run's data can only be purged through sudo_ (a non-root runner would
+	# fail on every part.* file and abort the whole up).
+	sudo_ rm -rf "$MINIO_DATA"
 	mkdir -p "$MINIO_DATA"
 	local net
 	net="$(kind_network)"
@@ -878,7 +890,18 @@ wait_succeeded() { # description attempts probe probe_failed
 }
 
 template_up() {
-	kubectl apply -f "$REPO_ROOT/config/samples/sandboxtemplate-firecracker.yaml" >/dev/null
+	# Render SBX_IMAGE / EXECD into the sample so the documented overrides
+	# really select what gets built (the builder pulls with
+	# go-containerregistry, which ignores the docker daemon registry-mirrors,
+	# so a mirror has to be spelled out in the reference itself). Defaults
+	# reproduce the sample verbatim.
+	local template_spec="$WORK/sandboxtemplate-firecracker.yaml"
+	sed -e "s|^  image: .*|  image: $SBX_IMAGE|" \
+		-e "s|^  execd: .*|  execd: $EXECD|" \
+		"$REPO_ROOT/config/samples/sandboxtemplate-firecracker.yaml" > "$template_spec"
+	grep -q "^  image: $SBX_IMAGE\$" "$template_spec" || die "could not render image=$SBX_IMAGE into the template spec"
+	grep -q "^  execd: $EXECD\$" "$template_spec" || die "could not render execd=$EXECD into the template spec"
+	kubectl apply -f "$template_spec" >/dev/null
 	wait_succeeded "template phase=Succeeded" 300 template_succeeded template_failed
 	local manifest_ref
 	manifest_ref="$(kubectl_get "sandboxtemplate/$SBX_TEMPLATE" '{.status.manifestRef}')"
@@ -2726,6 +2749,9 @@ down() {
 		|| fail "MinIO container still present"
 	rm -f "$WORK/agent-registry.json" "$WORK/registry.json"
 	rm -rf "$GEN_DIR"
+	# Root-owned MinIO object store (written by the container); leaving it
+	# behind pollutes the repo and breaks docker build contexts.
+	sudo_ rm -rf "$MINIO_DATA"
 	sysctl_restore
 	stateroot_xfs_down
 	# Purge the runtime cache the environment owns. The pull layer treats a

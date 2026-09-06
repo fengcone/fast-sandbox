@@ -52,6 +52,12 @@ RUN cd /src/overlaybd \
 # --- sandboxtemplate-builder binary ----------------------------------------
 FROM golang:1.25 AS builder-build
 
+# GOPROXY is overridable (docker build --build-arg GOPROXY=...) so hosts
+# without direct proxy.golang.org access can download modules from a mirror;
+# the default keeps the Go toolchain behaviour unchanged.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

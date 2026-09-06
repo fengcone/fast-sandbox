@@ -5,6 +5,13 @@
 .remote-dev-run.env
 bin
 vendor
+# Local integration-env workspaces: they hold root-owned MinIO/mc state, so
+# leaving them in the build context makes every docker build fail with
+# "error checking context: can't stat ..." once the environment has run.
+.integration-env
+.integration-env-gen
+.firecracker-chain-e2e
+.chain-e2e-gen
 sdk/python/.venv
 **/__pycache__
 **/.pytest_cache

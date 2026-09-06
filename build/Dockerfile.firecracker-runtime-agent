@@ -13,6 +13,10 @@ ARG DART_REV=a85f39f13d81241b3d57f7f7fe7b7c84d58b7aa2
 FROM golang:1.25 AS dart-build
 
 ARG DART_REV
+# GOPROXY is overridable (docker build --build-arg GOPROXY=...) for hosts
+# without direct proxy.golang.org access; the default is the Go toolchain one.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 
 RUN git init /src/dart \
     && cd /src/dart \

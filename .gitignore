@@ -282,6 +282,8 @@ generated/
 # Local E2E workspaces and helpers
 /.firecracker-chain-e2e/
 /.chain-e2e-gen/
+/.integration-env/
+/.integration-env-gen/
 
 # stray agent binary built by ad-hoc go build
 /firecracker-runtime-agent
