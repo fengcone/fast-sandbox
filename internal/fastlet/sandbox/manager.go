@@ -69,8 +69,17 @@ type SandboxManager struct {
 	registryProvider    registryconfig.Provider
 	routePublisher      RoutePublisher
 	dataPlaneWorkers    map[string]dataPlaneWorker
-	readinessChanged    chan struct{}
-	heartbeatSequence   atomic.Uint64
+	// imageBootWorkers drives cold Sandboxes from the image-pending phase to
+	// a committed runtime: once the async artifact delivery reports
+	// Delivered, the worker boots the runtime (EnsureSandbox) and commits it
+	// exactly like the synchronous create path.
+	imageBootWorkers map[string]imageBootWorker
+	// runtimeMessages carries the per-Sandbox runtime observation message
+	// (e.g. image delivery progress and terminal create failures) projected
+	// onto SandboxStatus.Runtime.Message.
+	runtimeMessages   map[string]string
+	readinessChanged  chan struct{}
+	heartbeatSequence atomic.Uint64
 	// sandboxes  sandboxID -> metadata
 	sandboxes map[string]*SandboxMetadata
 }
@@ -142,6 +151,8 @@ func NewSandboxManagerWithConfig(runtime RuntimeDriver, config SandboxManagerCon
 		readinessChanged: make(chan struct{}),
 		routePublisher:   config.RoutePublisher,
 		dataPlaneWorkers: make(map[string]dataPlaneWorker),
+		imageBootWorkers: make(map[string]imageBootWorker),
+		runtimeMessages:  make(map[string]string),
 		sandboxes:        make(map[string]*SandboxMetadata),
 	}
 	if manager.actionManager != nil {
@@ -405,6 +416,7 @@ func (m *SandboxManager) asyncDelete(sandboxID string, expected *SandboxMetadata
 			FastletPodUID: identity.FastletPodUID,
 		})
 		delete(m.sandboxes, sandboxID)
+		delete(m.runtimeMessages, sandboxID)
 		m.cacheProtection.Unprotect(expected.Config.Spec.Image, fastletcache.ProtectActive)
 		m.cacheProtection.ProtectHotUntil(expected.Config.Spec.Image, m.clock.Now().Add(time.Hour))
 		m.recordDiagnosticLocked(sandboxID, "info", "fastlet", "deleted", "proxy route and runtime resources were deleted")
@@ -427,8 +439,12 @@ func (m *SandboxManager) GetCapacity() int {
 func (m *SandboxManager) GetSandboxStatuses(ctx context.Context) []fastletapi.SandboxStatus {
 	m.mu.RLock()
 	snapshots := make(map[string]SandboxMetadata, len(m.sandboxes))
+	messages := make(map[string]string, len(m.sandboxes))
 	for sandboxID, metadata := range m.sandboxes {
 		snapshots[sandboxID] = *metadata
+		if message := m.runtimeMessages[sandboxID]; message != "" && metadata.Phase != "running" {
+			messages[sandboxID] = message
+		}
 	}
 	proxyReady := m.routePublisher == nil || m.routeReady
 	m.mu.RUnlock()
@@ -438,6 +454,9 @@ func (m *SandboxManager) GetSandboxStatuses(ctx context.Context) []fastletapi.Sa
 		identity := meta.Config.Identity
 		dataPlaneReady := proxyReady && routeReadyForPhase(meta.Phase)
 		runtimeObservation, dataPlaneObservation := observationsForPhase(meta.Phase, dataPlaneReady)
+		if message := messages[sandboxID]; message != "" {
+			runtimeObservation.Message = message
+		}
 		if inspected, err := m.runtime.InspectSandbox(ctx, sandboxID); err == nil {
 			runtimeObservation.Message = inspected.Phase
 		}

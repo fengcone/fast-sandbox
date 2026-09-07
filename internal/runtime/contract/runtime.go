@@ -47,6 +47,35 @@ type ArtifactCache interface {
 	PullImage(ctx context.Context, image string) error
 }
 
+// ImageDeliveryStatus reports the delivery state of an image that is not
+// (yet) present in the local cache.
+type ImageDeliveryStatus string
+
+const (
+	// ImageDelivering reports that the artifact delivery is in flight on the
+	// node; the caller must poll again later instead of blocking.
+	ImageDelivering ImageDeliveryStatus = "Delivering"
+	// ImageDelivered reports that the image is committed in the local cache
+	// and the Sandbox can boot from it.
+	ImageDelivered ImageDeliveryStatus = "Delivered"
+)
+
+// ImageDelivery is the optional runtime extension for asynchronous artifact
+// delivery. Runtimes whose first boot can require a cold transfer of the
+// Sandbox image (Firecracker) implement it so the create path never blocks on
+// the network: a missing image parks the Sandbox in a delivery phase while a
+// node-side pull runs in the background.
+//
+// DeliverImage guarantees that an attempt to deliver image is in flight (it is
+// idempotent and safe to call concurrently) and reports the current state
+// without waiting for the transfer to finish. A non-nil error means delivery
+// is impossible right now (e.g. no runtime-agent in local mode) and the caller
+// must not park; delivery failures that happen asynchronously are reported by
+// a later call.
+type ImageDelivery interface {
+	DeliverImage(ctx context.Context, image string) (ImageDeliveryStatus, error)
+}
+
 type ResourceRecoverer interface {
 	RecoverRuntimeResources(ctx context.Context, managed []*Metadata) error
 }

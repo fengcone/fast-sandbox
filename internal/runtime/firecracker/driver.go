@@ -70,6 +70,14 @@ type Driver struct {
 	// in memory: the GC evicts by this instead of filesystem timestamps.
 	// Guarded by mu.
 	imageUseCount map[string]int64
+	// imageDeliveries tracks the asynchronous artifact delivery of images
+	// requested by DeliverImage (image_delivery.go). The map itself is
+	// guarded by mu; each tracker has its own mutex.
+	imageDeliveries map[string]*imageDelivery
+	// imageDeliveryAttemptTimeout and imageDeliveryFailureWindow tune the
+	// background delivery; zero values select the package defaults.
+	imageDeliveryAttemptTimeout time.Duration
+	imageDeliveryFailureWindow  time.Duration
 	// nodeCleanup is the node janitor client for residual VMM cleanup after
 	// DeleteSandbox (set by fastlet when the profile requires it; nil in
 	// local/host mode).
@@ -376,33 +384,15 @@ func (d *Driver) EnsureSandbox(ctx context.Context, input *fastletapi.EnsureSand
 		return nil, fmt.Errorf("%w: firecracker requires the Fastlet network manager", ErrNetworkUnavailable)
 	}
 
-	// On-demand image loading: a create whose image is not yet cached asks
-	// the node runtime-agent to pull it (PinImage proxy, artifact bytes via
-	// the DART data plane) instead of failing admission with
-	// ErrImageNotReady. A cached image never touches the agent (sandbox
-	// creates do not pin: only the pod-level warm pull pins once, and every
-	// DeleteSandbox unpins once). Local mode (no agent socket) and
-	// unreachable-agent fallbacks keep the pre-warmed behavior unchanged:
-	// a still-missing image reports ErrImageNotReady exactly as before.
+	// Image readiness: a create whose image is not yet cached never blocks
+	// on the node-side pull. Fastlet routes cold creates through the
+	// driver's asynchronous delivery (DeliverImage): the artifact set is
+	// pulled in the background and the Sandbox is booted once the commit
+	// point appears in the local cache. Local mode (no agent socket) keeps
+	// the pre-warmed behavior: a still-missing image reports
+	// ErrImageNotReady and the create fails exactly as before.
 	if _, err := resolveRootfsImage(stateRoot, spec.Image); err != nil {
-		if !errors.Is(err, ErrImageNotReady) {
-			return nil, err
-		}
-		client, clientErr := d.agentClientOrNil()
-		if clientErr != nil {
-			return nil, clientErr
-		}
-		if client != nil {
-			if _, err := client.PinImage(ctx, d.warmPullRequestID(spec.Image), spec.Image); err != nil {
-				if !errors.Is(err, errAgentUnreachable) {
-					return nil, err
-				}
-				// The agent is absent mid-flight: fall through, the local
-				// check below reports the missing image as before.
-			} else if _, err := resolveRootfsImage(stateRoot, spec.Image); err != nil {
-				return nil, err
-			}
-		}
+		return nil, err
 	}
 
 	directory, err := ensureSandboxDir(stateRoot, identity.SandboxUID)

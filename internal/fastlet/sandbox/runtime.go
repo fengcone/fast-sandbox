@@ -14,6 +14,13 @@ type AccessDescriptorProvider = runtimecontract.AccessDescriptorProvider
 type CapabilityReport = runtimecontract.CapabilityReport
 type RoutePublication = dataplane.RoutePublication
 type RoutePublisher = dataplane.RoutePublisher
+type ImageDelivery = runtimecontract.ImageDelivery
+type ImageDeliveryStatus = runtimecontract.ImageDeliveryStatus
+
+const (
+	ImageDelivering = runtimecontract.ImageDelivering
+	ImageDelivered  = runtimecontract.ImageDelivered
+)
 
 var (
 	ErrUnsupportedRuntime     = runtimecontract.ErrUnsupportedRuntime
@@ -23,4 +30,5 @@ var (
 	ErrInfraUnavailable       = runtimecontract.ErrInfraUnavailable
 	ErrSandboxProfileMismatch = runtimecontract.ErrSandboxProfileMismatch
 	ErrInvalidConfig          = runtimecontract.ErrInvalidConfig
+	ErrImageNotReady          = runtimecontract.ErrImageNotReady
 )

@@ -71,6 +71,19 @@ func (m *SandboxManager) CreateSandbox(ctx context.Context, req *fastletapi.Crea
 	if bindingFailure, currentAdmission := m.registerDesiredBindings(placeholder, req); bindingFailure != nil {
 		return createFailureWithDisposition(bindingFailure, currentAdmission, fastletapi.CreateDispositionRejectedBeforeSideEffects)
 	}
+	// Async artifact delivery: when the runtime supports it (Firecracker),
+	// a missing image is delivered in the background instead of blocking
+	// this create on the network. The Sandbox parks in image-pending and a
+	// boot worker boots it once the image is committed.
+	if delivery, ok := m.runtime.(ImageDelivery); ok {
+		deliverStatus, deliverErr := delivery.DeliverImage(ctx, input.Sandbox.Spec.Image)
+		if deliverErr != nil {
+			return m.handleRuntimeCreateFailure(ctx, &input, placeholder, deliverErr)
+		}
+		if deliverStatus == ImageDelivering {
+			return m.parkForImageDelivery(req, &input, placeholder, started)
+		}
+	}
 	metadata, err := m.ensureRuntimeForCreate(ctx, started, &input)
 	if err != nil {
 		return m.handleRuntimeCreateFailure(ctx, &input, placeholder, err)
@@ -153,7 +166,17 @@ func (m *SandboxManager) reserveSandboxForCreate(req *fastletapi.CreateSandboxRe
 		return reject(fastletError(fastletapi.ErrorDraining, m.drainReason, true), fastletapi.CreateDispositionRejectedBeforeSideEffects)
 	}
 	if len(m.sandboxes) >= m.capacity {
-		return reject(fastletError(fastletapi.ErrorCapacityRejected, "Fastlet admission capacity is exhausted", true), fastletapi.CreateDispositionRejectedBeforeSideEffects)
+		// A terminal create-failed Sandbox is projected but occupies no
+		// capacity: it must not block new creates.
+		active := 0
+		for _, managed := range m.sandboxes {
+			if managed.Phase != "create-failed" {
+				active++
+			}
+		}
+		if active >= m.capacity {
+			return reject(fastletError(fastletapi.ErrorCapacityRejected, "Fastlet admission capacity is exhausted", true), fastletapi.CreateDispositionRejectedBeforeSideEffects)
+		}
 	}
 	if !m.runtimeResourceAvailable() {
 		return reject(fastletError(fastletapi.ErrorNetworkUnavailable, "Fastlet has no clean runtime/network resource available", true), fastletapi.CreateDispositionRejectedBeforeSideEffects)
@@ -204,6 +227,7 @@ func (m *SandboxManager) handleRuntimeCreateFailure(ctx context.Context, input *
 	disposition := fastletapi.CreateDispositionRejectedBeforeSideEffects
 	if cleanupErr == nil && m.sandboxes[sandboxUID] == placeholder {
 		delete(m.sandboxes, sandboxUID)
+		delete(m.runtimeMessages, sandboxUID)
 	} else if m.sandboxes[sandboxUID] == placeholder {
 		placeholder.Phase = "create-cleanup-failed"
 		disposition = fastletapi.CreateDispositionFailedNeedsCleanup
@@ -358,6 +382,7 @@ func (m *SandboxManager) retryFailedCreateCleanup(ctx context.Context, req *fast
 		return createFailureWithDisposition(fastletErrorWithCause(fastletapi.ErrorRuntimeUnavailable, message, true, cleanupErr), admission, fastletapi.CreateDispositionFailedNeedsCleanup)
 	}
 	delete(m.sandboxes, sandboxUID)
+	delete(m.runtimeMessages, sandboxUID)
 	m.mu.Unlock()
 	m.recordDiagnostic(sandboxUID, "info", "runtime", "cleanup-recovered", "failed Create cleanup converged; retrying the same runtime identity")
 	return m.CreateSandbox(ctx, req)
@@ -418,7 +443,8 @@ func (m *SandboxManager) DeleteSandboxContext(ctx context.Context, req *fastleta
 			m.mu.Unlock()
 			return &fastletapi.DeleteSandboxResponse{}, nil
 		}
-		wasCreating = metadata.Phase == "creating"
+		wasCreating = metadata.Phase == "creating" || metadata.Phase == "image-pending"
+		m.cancelImageBootWorkerLocked(metadata)
 		m.cancelDataPlaneReconcileLocked(metadata)
 		metadata.Phase = "terminating"
 	}
@@ -575,7 +601,7 @@ func (m *SandboxManager) createExistingLocked(existing *SandboxMetadata, request
 		return createFailure(fastletError(fastletapi.ErrorConflict, "Sandbox UID is already bound to a different claim/profile", false), m.admissionStatusLocked())
 	}
 	status := m.sandboxStatusLocked(existing)
-	if existing.Phase == "creating" {
+	if existing.Phase == "creating" || existing.Phase == "image-pending" {
 		failure := fastletError(fastletapi.ErrorInProgress, "Sandbox creation is already in progress", true)
 		return &fastletapi.CreateSandboxResponse{Disposition: fastletapi.CreateDispositionInProgress, Sandbox: &status, Admission: m.admissionStatusLocked(), Error: failure}, failure
 	}
@@ -677,10 +703,13 @@ func (m *SandboxManager) admissionStatusLocked() fastletapi.AdmissionStatus {
 	status := fastletapi.AdmissionStatus{Capacity: m.capacity}
 	for _, metadata := range m.sandboxes {
 		switch metadata.Phase {
-		case "creating", "infra-pending", "initializing-infra", "infra-unavailable", "route-pending", "publishing-route", "route-unavailable", "action-pending", "action-unavailable":
+		case "creating", "image-pending", "infra-pending", "initializing-infra", "infra-unavailable", "route-pending", "publishing-route", "route-unavailable", "action-pending", "action-unavailable":
 			status.Creating++
 		case "terminating", "deleting", "delete-failed", "create-cleanup", "create-cleanup-failed":
 			status.Deleting++
+		case "create-failed":
+			// Terminal create failure: projected for the Controller but it
+			// occupies no admission capacity.
 		default:
 			status.Running++
 		}
@@ -696,6 +725,9 @@ func (m *SandboxManager) admissionStatusLocked() fastletapi.AdmissionStatus {
 func (m *SandboxManager) sandboxStatusLocked(metadata *SandboxMetadata) fastletapi.SandboxStatus {
 	dataPlaneReady := (m.routePublisher == nil || m.routeReady) && routeReadyForPhase(metadata.Phase)
 	runtime, dataPlane := observationsForPhase(metadata.Phase, dataPlaneReady)
+	if message := m.runtimeMessages[metadata.Config.Identity.SandboxUID]; message != "" && metadata.Phase != "running" {
+		runtime.Message = message
+	}
 	return fastletapi.SandboxStatus{
 		SandboxID:          metadata.Config.Identity.SandboxUID,
 		InstanceGeneration: metadata.Config.Identity.InstanceGeneration, RuntimeInstanceID: metadata.Config.Identity.RuntimeInstanceID, AssignmentAttempt: metadata.Config.Identity.AssignmentAttempt,
@@ -710,8 +742,10 @@ func observationsForPhase(phase string, routeReady bool) (fastletapi.RuntimeObse
 	runtime := fastletapi.RuntimeObservation{State: fastletapi.RuntimeStateUnknown}
 	dataPlane := fastletapi.DataPlaneObservation{State: fastletapi.DataPlaneStateUnknown}
 	switch phase {
-	case "creating":
+	case "creating", "image-pending":
 		runtime.State, dataPlane.State = fastletapi.RuntimeStateCreating, fastletapi.DataPlaneStatePending
+	case "create-failed":
+		runtime.State, dataPlane.State = fastletapi.RuntimeStateFailed, fastletapi.DataPlaneStateFailed
 	case "infra-pending", "initializing-infra", "route-pending", "publishing-route":
 		runtime.State, dataPlane.State = fastletapi.RuntimeStateReady, fastletapi.DataPlaneStatePublishing
 	case "infra-unavailable", "route-unavailable":
