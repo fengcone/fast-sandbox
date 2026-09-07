@@ -890,6 +890,12 @@ template_up() {
 	# $LOGS_DIR/builder-capture.log (plus a live Pod YAML snapshot); when the
 	# build fails, failure_dump tails the capture so the real builder error
 	# lands in the dump instead of being lost with the Pod.
+	# An interrupted/failed run leaves its capture loop orphaned and
+	# spamming; reap it via the pidfile before starting a fresh one.
+	if [[ -f "$LOGS_DIR/builder-capture.pid" ]]; then
+		kill "$(cat "$LOGS_DIR/builder-capture.pid" 2>/dev/null)" 2>/dev/null || true
+		sleep 0.2
+	fi
 	builder_log_capture &
 	capture_pid=$!
 	kubectl apply -f "$REPO_ROOT/config/samples/sandboxtemplate-firecracker.yaml" >/dev/null
@@ -911,6 +917,7 @@ template_up() {
 builder_log_capture() {
 	local pod="" stream_pid=""
 	mkdir -p "$LOGS_DIR"
+	echo "$BASHPID" > "$LOGS_DIR/builder-capture.pid"
 	while :; do
 		local current
 		current="$(kubectl -n "$NS" get pods -l sandbox.fast.io/sandboxtemplate -o name 2>/dev/null | head -1 || true)"
@@ -923,8 +930,9 @@ builder_log_capture() {
 				: # follower alive on this pod
 			else
 				[[ -n "${stream_pid:-}" ]] && kill "$stream_pid" 2>/dev/null || true
+				[[ "$current" != "$pod" ]] \
+					&& log "capturing builder logs: ${current#pod/} -> $LOGS_DIR/builder-capture.log"
 				pod="$current"
-				log "capturing builder logs: ${current#pod/} -> $LOGS_DIR/builder-capture.log"
 				( kubectl -n "$NS" logs "$current" --all-containers -f > "$LOGS_DIR/builder-capture.log" 2>&1 || true ) &
 				stream_pid=$!
 			fi
