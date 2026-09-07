@@ -915,8 +915,14 @@ builder_log_capture() {
 		local current
 		current="$(kubectl -n "$NS" get pods -l sandbox.fast.io/sandboxtemplate -o name 2>/dev/null | head -1 || true)"
 		if [[ -n "$current" ]]; then
-			if [[ "$current" != "$pod" ]]; then
-				[[ -n "$stream_pid" ]] && kill "$stream_pid" 2>/dev/null || true
+			# (Re)start the follower only when it is missing or dead: the
+			# first attempt races ContainerCreating (kubectl logs exits with
+			# a 400 while the container has not started), so a dead follower
+			# must be relaunched even though the pod name is unchanged.
+			if [[ "$current" == "$pod" ]] && kill -0 "${stream_pid:-0}" 2>/dev/null; then
+				: # follower alive on this pod
+			else
+				[[ -n "${stream_pid:-}" ]] && kill "$stream_pid" 2>/dev/null || true
 				pod="$current"
 				log "capturing builder logs: ${current#pod/} -> $LOGS_DIR/builder-capture.log"
 				( kubectl -n "$NS" logs "$current" --all-containers -f > "$LOGS_DIR/builder-capture.log" 2>&1 || true ) &
@@ -927,7 +933,7 @@ builder_log_capture() {
 			kubectl -n "$NS" get pod "$current" -o yaml > "$LOGS_DIR/builder-capture-pod.yaml" 2>/dev/null || true
 		else
 			pod=""
-			[[ -n "$stream_pid" ]] && { kill "$stream_pid" 2>/dev/null || true; stream_pid=""; }
+			[[ -n "${stream_pid:-}" ]] && { kill "$stream_pid" 2>/dev/null || true; stream_pid=""; }
 		fi
 		sleep 1
 	done
