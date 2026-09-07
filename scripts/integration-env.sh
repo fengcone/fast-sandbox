@@ -268,6 +268,10 @@ failure_dump() { # task
 		echo "--- builder pods + logs (tail) ---"
 		kubectl get pods -n "$NS" -l sandbox.fast.io/sandboxtemplate --show-labels 2>&1 || true
 		kubectl logs -n "$NS" -l sandbox.fast.io/sandboxtemplate --tail=80 2>&1 || true
+		echo "--- builder capture log (tail 120) ---"
+		tail -120 "$LOGS_DIR/builder-capture.log" 2>&1 || true
+		echo "--- builder capture pod (terminated state) ---"
+		grep -E 'phase:|reason:|message:|exitCode:|lastState:' "$LOGS_DIR/builder-capture-pod.yaml" 2>/dev/null | tail -20 || true
 		echo "--- template ---"
 		kubectl get sandboxtemplate -n "$NS" -o yaml 2>&1 || true
 		echo "--- pool ---"
@@ -879,14 +883,54 @@ wait_succeeded() { # description attempts probe probe_failed
 }
 
 template_up() {
+	local capture_pid
+	# The controller deletes the builder Pod right after it terminates
+	# (cleanupPod), so its logs are unrecoverable after the fact. Start a
+	# background capture that follows the build Pod for its whole life into
+	# $LOGS_DIR/builder-capture.log (plus a live Pod YAML snapshot); when the
+	# build fails, failure_dump tails the capture so the real builder error
+	# lands in the dump instead of being lost with the Pod.
+	builder_log_capture &
+	capture_pid=$!
 	kubectl apply -f "$REPO_ROOT/config/samples/sandboxtemplate-firecracker.yaml" >/dev/null
 	wait_succeeded "template phase=Succeeded" 300 template_succeeded template_failed
+	kill "$capture_pid" 2>/dev/null || true
 	local manifest_ref
 	manifest_ref="$(kubectl_get "sandboxtemplate/$SBX_TEMPLATE" '{.status.manifestRef}')"
 	[[ -n "$manifest_ref" ]] || fail "template manifestRef is empty"
 	log "template manifestRef: $manifest_ref"
 	assert_publish_layout
 	pass "SandboxTemplate Succeeded + artifacts published"
+}
+
+# builder_log_capture follows the SandboxTemplate builder Pod (if any) in the
+# background and streams its logs to $LOGS_DIR/builder-capture.log. Runs for
+# the whole template task; safe to leave orphaned on failure (idle loop).
+# The controller deletes the Pod within ~1s of termination, so the stream
+# must already be attached when the failure happens.
+builder_log_capture() {
+	local pod="" stream_pid=""
+	mkdir -p "$LOGS_DIR"
+	while :; do
+		local current
+		current="$(kubectl -n "$NS" get pods -l sandbox.fast.io/sandboxtemplate -o name 2>/dev/null | head -1 || true)"
+		if [[ -n "$current" ]]; then
+			if [[ "$current" != "$pod" ]]; then
+				[[ -n "$stream_pid" ]] && kill "$stream_pid" 2>/dev/null || true
+				pod="$current"
+				log "capturing builder logs: ${current#pod/} -> $LOGS_DIR/builder-capture.log"
+				( kubectl -n "$NS" logs "$current" --all-containers -f > "$LOGS_DIR/builder-capture.log" 2>&1 || true ) &
+				stream_pid=$!
+			fi
+			# Live snapshot: the last write before cleanupPod carries the
+			# terminated container state (reason/message) of the build.
+			kubectl -n "$NS" get pod "$current" -o yaml > "$LOGS_DIR/builder-capture-pod.yaml" 2>/dev/null || true
+		else
+			pod=""
+			[[ -n "$stream_pid" ]] && { kill "$stream_pid" 2>/dev/null || true; stream_pid=""; }
+		fi
+		sleep 1
+	done
 }
 
 assert_publish_layout() {
