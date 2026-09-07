@@ -30,7 +30,7 @@ IMAGE="${SANDBOX_TEMPLATE_IMAGE:-alpine:3.19}"
 # comma-separated list to run a subset.
 FORMATS=()
 BUILDER_IMAGE="${SANDBOX_TEMPLATE_BUILDER_IMAGE:-sandboxtemplate-builder:e2e}"
-KERNEL_URL="${SANDBOX_TEMPLATE_KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.1.176}"
+KERNEL_URL="${SANDBOX_TEMPLATE_KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.18.36}"
 LOCAL_MODE=0
 
 log() { printf '\033[1;34m[st-e2e]\033[0m %s\n' "$*"; }

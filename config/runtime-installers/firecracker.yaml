@@ -49,7 +49,7 @@ spec:
           # Amazon microvm kernel (Firecracker CI artifact) with ACPI/VMGenID
           # support: the quickstart vmlinux.bin is Linux 4.14, whose CRNG is
           # not reseeded at snapshot resume (execd /command hangs, #1695).
-          KERNEL_URL="${KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.1.176}"
+          KERNEL_URL="${KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.18.36}"
           ARCH="$(uname -m)"
           case "$ARCH" in x86_64) ASSET_ARCH="x86_64";; aarch64) ASSET_ARCH="aarch64";; *) echo "unsupported arch $ARCH" >&2; exit 1;; esac
           mkdir -p "$DEST"

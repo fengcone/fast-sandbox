@@ -145,7 +145,7 @@ spec:
   entrypoint:                              # empty: defaults to ["tail","-f","/dev/null"]
     - /opt/gem/run.sh
   execd: registry.example.com/execd:v1.0.21
-  kernel: vmlinux-6.1.177
+  kernel: vmlinux-6.18.36
   machine:
     vcpu: "4"                        # Kubernetes resource quantity
     memory: "8Gi"                    # e.g. 512Mi / 2Gi / 8Gi
@@ -194,7 +194,7 @@ Every build emits a content-addressed `manifest.json`:
   "sourceImageDigest": "sha256:...",
   "execd": "registry.example.com/execd:v1.0.21",
   "kernel": {
-    "name": "vmlinux-6.1.177",
+    "name": "vmlinux-6.18.36",
     "digest": "sha256:..."
   },
   "machine": { "vcpu": "4", "memory": "8Gi" },          // parsed into vcpuCount/memoryMiB by the engine

@@ -301,10 +301,25 @@ func configureVM(vm *vmm, kernel, rootfs, bootArgs string, spec apiv1alpha2.Sand
 // directory (the driver's instanceRootfsName).
 const snapshotDriveName = "rootfs.img"
 
-// ensureBuildTap creates the host tap backing the baked NIC.
+// ensureBuildTap creates the host tap backing the baked NIC and brings it
+// up with the baked gateway address on it.
+//
+// The tap MUST be UP or the tun driver answers every guest TX with EIO
+// (writes to a down tap return -EIO): during the bake the guest's
+// network-dependent bootstrap (execd resolving/announcing through its
+// baked gateway/DNS 172.30.0.1) then fails and SANDBOX_READY never
+// appears. This mirrors the runtime per-clone tap setup
+// (guest_vm_linux_driver.go): the tap is brought up and owns the gateway
+// address so the guest can resolve 172.30.0.1 on the L2 segment.
 func ensureBuildTap() error {
 	if output, err := exec.Command("ip", "tuntap", "add", "dev", buildTap, "mode", "tap").CombinedOutput(); err != nil {
 		return fmt.Errorf("create build tap %s: %w: %s", buildTap, err, strings.TrimSpace(string(output)))
+	}
+	if output, err := exec.Command("ip", "link", "set", buildTap, "up").CombinedOutput(); err != nil {
+		return fmt.Errorf("bring build tap %s up: %w: %s", buildTap, err, strings.TrimSpace(string(output)))
+	}
+	if output, err := exec.Command("ip", "addr", "replace", bakedGuestGateway+"/24", "dev", buildTap).CombinedOutput(); err != nil {
+		return fmt.Errorf("assign gateway %s to build tap %s: %w: %s", bakedGuestGateway, buildTap, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

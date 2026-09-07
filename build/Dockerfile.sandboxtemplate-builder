@@ -64,18 +64,20 @@ FROM ubuntu:22.04
 
 ARG FIRECRACKER_VERSION
 ARG OCI2ROOTFS_REV
-# The default pins the Firecracker CI Amazon microvm kernel (6.1, ACPI +
-# VMGenID backports) under its real name; override both together to embed a
+# The default pins the Firecracker CI Amazon microvm kernel (6.18, ACPI +
+# VMGenID support) under its real name; override both together to embed a
 # different kernel. NOTE: the historical "quickstart" vmlinux.bin is
 # Linux 4.14.174 — too old to run modern execd sanely after a snapshot
 # restore: it lacks random.trust_cpu support AND VMGenID, so the CRNG
 # initialized during the bake boot is left without a reseed source on every
 # resume and getrandom() blocks forever (execd POST /command, OpenSandbox
 # #1695). Refresh the pinned artifact via:
-#   curl -sS "https://s3.amazonaws.com/spec.ccfc.min?list-type=2&prefix=firecracker-ci/x86_64&max-keys=2000" | grep -o "<Key>[^<]*vmlinux[^<]*</Key>"
-# and pick the newest x86_64/vmlinux-6.1.<x> (or 5.10.25x) key.
+#   curl -sS "https://s3.amazonaws.com/spec.ccfc.min?list-type=2&prefix=firecracker-ci/&max-keys=1000" | grep -o "<Key>[^<]*vmlinux[^<]*</Key>"
+# and pick the newest x86_64/vmlinux-<major.minor.patch> key. The runtime
+# node kernel (config/runtime-installers/firecracker.yaml) must pin the same
+# build for snapshot/restore compatibility.
 ARG KERNEL_NAME=vmlinux.bin
-ARG KERNEL_URL=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.1.176
+ARG KERNEL_URL=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.18.36
 
 ENV OCI2ROOTFS_REV=${OCI2ROOTFS_REV}
 

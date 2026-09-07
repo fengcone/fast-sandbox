@@ -251,7 +251,7 @@ if [[ ! -x "$FC_JAILER" ]]; then
     cp "$found" "$FC_JAILER" && chmod +x "$FC_JAILER"
     rm -rf "$WORK/extract"
 fi
-[[ -f "$FC_KERNEL" ]] || download "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.1.176" "$FC_KERNEL"
+[[ -f "$FC_KERNEL" ]] || download "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.18.36" "$FC_KERNEL"
 [[ -f "$FC_ROOTFS" ]] || download "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4" "$FC_ROOTFS"
 
 # --- MinIO -------------------------------------------------------------------

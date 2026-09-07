@@ -233,7 +233,7 @@ fi
 if [[ ! -f "$FC_KERNEL" ]]; then
     # Snapshot-prep asset: the kernel only boots the one preparation VM that
     # produces the golden snapshot set; restored Sandboxes never boot a kernel.
-    download "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.1.176" "$FC_KERNEL"
+    download "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260722-38359b8055fc-0/x86_64/vmlinux-6.18.36" "$FC_KERNEL"
 fi
 if [[ ! -f "$FC_ROOTFS" ]]; then
     # Snapshot-prep input: the preparation VM's root drive; the golden
