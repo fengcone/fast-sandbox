@@ -321,9 +321,14 @@ func (o *Orchestrator) createRuntimeOnTarget(ctx context.Context, sandbox *apiv1
 		},
 	}
 	response, createErr := o.FastletClient.CreateSandbox(ctx, fastlet.PodIP, request)
+	// A Created observation may be runtime-Creating: the Fastlet parks cold
+	// Sandboxes (asynchronous image delivery) and returns immediately. The
+	// Controller observes the Sandbox until it converges, so this is an
+	// accepted create, not a failure.
 	if createErr == nil && response != nil &&
 		(response.Disposition == fastletapi.CreateDispositionCreated || response.Disposition == fastletapi.CreateDispositionExisting) &&
-		response.Sandbox != nil && response.Sandbox.Runtime.State == fastletapi.RuntimeStateReady {
+		response.Sandbox != nil &&
+		(response.Sandbox.Runtime.State == fastletapi.RuntimeStateReady || response.Sandbox.Runtime.State == fastletapi.RuntimeStateCreating) {
 		return response, nil
 	}
 	if createErr == nil {

@@ -31,7 +31,10 @@ func (m *MockClient) ListSandboxes(ctx context.Context, in *fastpathv2.ListSandb
 	return &fastpathv2.ListSandboxesResponse{}, nil
 }
 func (m *MockClient) GetSandbox(ctx context.Context, in *fastpathv2.GetSandboxRequest, opts ...grpc.CallOption) (*fastpathv2.GetSandboxResponse, error) {
-	return &fastpathv2.GetSandboxResponse{Sandbox: &fastpathv2.SandboxInfo{}}, nil
+	return &fastpathv2.GetSandboxResponse{Sandbox: &fastpathv2.SandboxInfo{
+		Runtime: &fastpathv2.RuntimeInfo{State: fastpathv2.RuntimeState_RUNTIME_STATE_READY},
+		Ready:   true,
+	}}, nil
 }
 func (m *MockClient) GetSandboxDiagnostics(ctx context.Context, in *fastpathv2.SandboxDiagnosticsRequest, opts ...grpc.CallOption) (*fastpathv2.SandboxDiagnosticsResponse, error) {
 	if m.DiagnosticsFunc != nil {

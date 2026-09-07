@@ -187,12 +187,61 @@ Priority: Flags > Config File > Interactive Input
 		}
 
 		info := resp.GetSandbox()
+		if info == nil {
+			log.Fatalf("Error: CreateSandbox returned no Sandbox observation")
+		}
+		// Cold images are delivered asynchronously: the create returns as
+		// soon as the Sandbox is accepted (runtime Creating) and the
+		// artifact delivery + boot finish in the background. Poll until the
+		// Sandbox is Ready or reaches a terminal failure.
+		if !info.GetReady() {
+			namespace := viper.GetString("namespace")
+			fmt.Printf("Sandbox %s accepted (runtime %s); waiting for image delivery and startup...\n", name, info.GetRuntime().GetState())
+			info = waitForSandboxReady(context.Background(), client, name, namespace)
+		}
+
 		klog.V(4).InfoS("Sandbox created successfully", "name", name, "sandboxUid", info.GetIdentity().GetUid(), "sandboxName", info.GetIdentity().GetName(), "ready", info.GetReady(), "duration", time.Since(start))
 		fmt.Printf("🎉 Sandbox runtime created successfully in %v\n", time.Since(start))
 		fmt.Printf("Name:      %s\n", info.GetIdentity().GetName())
 		fmt.Printf("UID:       %s\n", info.GetIdentity().GetUid())
 		fmt.Printf("Ready:     %t\n", info.GetReady())
 	},
+}
+
+// waitForSandboxReady polls the Sandbox observation until it is Ready or
+// reaches a terminal state. Cold creates park in runtime Creating while the
+// image is delivered asynchronously, so the CLI resolves READY semantics on
+// the client side instead of holding the create RPC open.
+func waitForSandboxReady(ctx context.Context, client fastpathv2.FastPathServiceClient, name, namespace string) *fastpathv2.SandboxInfo {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		response, err := client.GetSandbox(ctx, &fastpathv2.GetSandboxRequest{
+			Sandbox: fastPathSandboxReference(name, namespace),
+		})
+		if err != nil {
+			klog.ErrorS(err, "GetSandbox while waiting for readiness failed", "name", name)
+			log.Fatalf("Error: %v", err)
+		}
+		info := response.GetSandbox()
+		if info == nil {
+			log.Fatalf("Error: GetSandbox returned no Sandbox observation")
+		}
+		if info.GetReady() {
+			return info
+		}
+		switch info.GetRuntime().GetState() {
+		case fastpathv2.RuntimeState_RUNTIME_STATE_FAILED,
+			fastpathv2.RuntimeState_RUNTIME_STATE_UNAVAILABLE,
+			fastpathv2.RuntimeState_RUNTIME_STATE_STOPPED:
+			log.Fatalf("Error: Sandbox %s reached terminal state %s", name, info.GetRuntime().GetState())
+		}
+		select {
+		case <-ctx.Done():
+			log.Fatalf("Error: waiting for Sandbox %s to become ready: %v", name, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func init() {

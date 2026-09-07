@@ -189,19 +189,20 @@ func TestSetAgentSocketEmptySwitchesToLocalMode(t *testing.T) {
 	require.Nil(t, client)
 }
 
-func TestEnsureSandboxColdCreatePullsMissingImage(t *testing.T) {
+// TestEnsureSandboxColdCreateNeverDeliversSynchronously: a cold image with a
+// configured agent must NOT block the create on the node-side pull. The
+// driver reports ErrImageNotReady without touching the agent — asynchronous
+// delivery belongs to DeliverImage (image_delivery_test.go), which Fastlet
+// drives before the Sandbox can boot.
+func TestEnsureSandboxColdCreateNeverDeliversSynchronously(t *testing.T) {
 	fixture := newDriverFixture(t)
 	agent := &fakeAgentClient{}
 	fixture.installAgent(agent)
 
-	// The image is NOT cached and the agent cannot materialize it (fake):
-	// the create must ask the agent for the pull (on-demand loading) and
-	// then fail with ErrImageNotReady — not reject without ever trying.
 	_, err := fixture.driver.EnsureSandbox(context.Background(), ensureInput(&fixture.sandboxSpec))
 	require.ErrorIs(t, err, ErrImageNotReady)
 	pins, _, _ := agent.snapshot()
-	require.Equal(t, []string{fixture.sandboxSpec.Spec.Image}, pins)
-	require.Equal(t, "warm-pull-pod-1-"+imageKey(fixture.sandboxSpec.Spec.Image), agent.pinReqs[0])
+	require.Empty(t, pins, "EnsureSandbox must not pull a missing image inline")
 }
 
 func TestEnsureSandboxCachedImageNeverPins(t *testing.T) {

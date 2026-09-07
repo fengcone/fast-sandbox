@@ -274,6 +274,34 @@ func TestLostCreateResponseDoesNotInspectOrChangeIdentity(t *testing.T) {
 	require.Equal(t, envelope, *current)
 }
 
+func TestEnsureRuntimeAcceptsParkedColdCreate(t *testing.T) {
+	orchestrator, registry, fastletClient, sandbox := newHarness(t)
+	parameters, err := orchestrator.ResolveRuntime(context.Background(), sandbox)
+	require.NoError(t, err)
+	candidate := candidateFor(parameters)
+	registry.fastlets[candidate.ID] = candidate
+	sandbox.UID = types.UID("sandbox-uid-a")
+	envelope, err := AssignmentForCandidate(candidate, 2, 1, 3, "runtime-a")
+	require.NoError(t, err)
+	require.NoError(t, assignment.SetAssignmentAnnotation(sandbox, envelope))
+	sandbox.Status = statusFromEnvelope(envelope)
+	require.NoError(t, orchestrator.Client.Create(context.Background(), sandbox))
+	fastletClient.create = func(string, *fastletapi.CreateSandboxRequest) (*fastletapi.CreateSandboxResponse, error) {
+		return &fastletapi.CreateSandboxResponse{
+			Disposition: fastletapi.CreateDispositionCreated,
+			Sandbox: &fastletapi.SandboxStatus{
+				SandboxID: string(sandbox.UID),
+				Runtime:   fastletapi.RuntimeObservation{State: fastletapi.RuntimeStateCreating, Message: "sandbox image is being delivered to the node"},
+				DataPlane: fastletapi.DataPlaneObservation{State: fastletapi.DataPlaneStatePending},
+			},
+		}, nil
+	}
+
+	observed, err := orchestrator.EnsureRuntime(context.Background(), sandbox)
+	require.NoError(t, err, "a parked cold create is an accepted create, not a failure")
+	require.Equal(t, fastletapi.RuntimeStateCreating, observed.Runtime.State)
+}
+
 func readyFastletObservation(sandboxID string, generation int64) *fastletapi.SandboxStatus {
 	return &fastletapi.SandboxStatus{
 		SandboxID:          sandboxID,
