@@ -99,10 +99,6 @@ func runSnapshotStage(args []string) error {
 	bootLog := filepath.Join(workdir, "boot.console.log")
 	bootSocket := filepath.Join(workdir, "boot.sock")
 	phaseStarted := time.Now()
-	vm, err := startVMM(bootSocket, bootLog, workdir)
-	if err != nil {
-		return err
-	}
 	// random.trust_cpu=on seeds the guest CRNG from RDRAND at boot. The
 	// microVM has no other entropy source (no virtio-rng device, and
 	// Firecracker snapshots preserve the CPUID mask), so without it the CRNG
@@ -113,8 +109,8 @@ func runSnapshotStage(args []string) error {
 	bootArgs := "console=ttyS0 reboot=k panic=1 pci=off nomodules net.ifnames=0 biosdevname=0 random.trust_cpu=on root=/dev/vda rw"
 	bootArgs += " init=" + guestInitPath(spec)
 	bootArgs = bakedNetworkBootArgs(bootArgs)
-	if err := configureVM(vm, kernel, rootfs, bootArgs, spec); err != nil {
-		vm.stop()
+	vm, err := bootPreparationVM(bootSocket, bootLog, workdir, kernel, rootfs, bootArgs, spec)
+	if err != nil {
 		return err
 	}
 	if err := waitForMarker(bootLog, "SANDBOX_READY", readinessTimeout(spec)); err != nil {
@@ -233,13 +229,64 @@ func (vm *vmm) stop() {
 	}
 }
 
+// snapshotCPUTemplate is the static Firecracker CPU template the golden
+// snapshot is built with (see configureVM).
+const snapshotCPUTemplate = "T2"
+
+// cpuTemplateNotPermitted reports whether a boot failure is Firecracker
+// refusing the static CPU template on this host. Static templates are only
+// permitted on the CPU models they were derived from (T2/C3/T2S on Intel
+// Skylake/Cascade Lake, T2A on AMD Milan), so every newer host — Ice Lake,
+// Sapphire Rapids and up — rejects them. The check happens when the vCPUs
+// are built, i.e. at InstanceStart: PUT /machine-config accepts the template
+// and only the start call reports the fault, which is why the retry needs a
+// fresh VMM rather than a second machine-config call.
+func cpuTemplateNotPermitted(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not permitted to apply the CPU template")
+}
+
+// bootPreparationVM cold-boots the snapshot preparation VM, falling back to
+// the host's unmasked CPUID when the host CPU model refuses the pinned
+// static template. The fallback trades snapshot portability (the artifacts
+// then carry this host's CPU features, so they restore only on
+// CPU-compatible hosts) for the ability to build at all — on a host where
+// no static template is permitted the alternative is no golden image.
+func bootPreparationVM(socket, logPath, workdir, kernel, rootfs, bootArgs string, spec apiv1alpha2.SandboxTemplateSpec) (*vmm, error) {
+	vm, err := startVMM(socket, logPath, workdir)
+	if err != nil {
+		return nil, err
+	}
+	err = configureVM(vm, kernel, rootfs, bootArgs, spec, snapshotCPUTemplate)
+	if err == nil {
+		return vm, nil
+	}
+	vm.stop()
+	if !cpuTemplateNotPermitted(err) {
+		return nil, err
+	}
+	klog.InfoS("host CPU model does not permit the pinned static CPU template; booting the preparation VM with the host CPUID instead (the snapshot becomes host-CPU specific and must be restored on CPU-compatible hosts)",
+		"cpuTemplate", snapshotCPUTemplate, "err", err)
+	vm, err = startVMM(socket, logPath, workdir)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureVM(vm, kernel, rootfs, bootArgs, spec, ""); err != nil {
+		vm.stop()
+		return nil, err
+	}
+	return vm, nil
+}
+
 // configureVM applies the machine config, boot source, root drive, the baked
 // guest NIC, and starts the instance. The NIC (iface eth0, MAC, and the
 // static guest address from the kernel ip= boot args) is baked into the
 // snapshot, so every restored instance resumes with the same guest network
 // (clone networking model); consumers override only the host tap name via
 // network_overrides.
-func configureVM(vm *vmm, kernel, rootfs, bootArgs string, spec apiv1alpha2.SandboxTemplateSpec) error {
+//
+// cpuTemplate is the static Firecracker CPU template to pin, or "" for the
+// host's unmasked CPUID (see bootPreparationVM).
+func configureVM(vm *vmm, kernel, rootfs, bootArgs string, spec apiv1alpha2.SandboxTemplateSpec, cpuTemplate string) error {
 	vcpuCount, err := vcpus(spec.Machine.VCPU)
 	if err != nil {
 		return err
@@ -251,13 +298,18 @@ func configureVM(vm *vmm, kernel, rootfs, bootArgs string, spec apiv1alpha2.Sand
 	// The cpu_template is pinned so the guest's CPUID is identical on every
 	// host: a full snapshot restored on a machine with different CPU
 	// features can fail or misbehave. T2 is the conservative cross-vendor
-	// baseline (fixed CPUID masking).
-	if err := api(vm.socket, "PUT", "/machine-config", map[string]any{
+	// baseline (fixed CPUID masking). An empty cpuTemplate omits the field
+	// entirely (Firecracker rejects an empty enum value) and boots with the
+	// host's own CPUID — see bootPreparationVM.
+	machineConfig := map[string]any{
 		"vcpu_count":   vcpuCount,
 		"mem_size_mib": memSize,
 		"smt":          false,
-		"cpu_template": "T2",
-	}); err != nil {
+	}
+	if cpuTemplate != "" {
+		machineConfig["cpu_template"] = cpuTemplate
+	}
+	if err := api(vm.socket, "PUT", "/machine-config", machineConfig); err != nil {
 		return err
 	}
 	// Entropy device (virtio-rng): the microVM has no other entropy source —

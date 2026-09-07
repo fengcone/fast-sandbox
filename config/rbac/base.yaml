@@ -40,7 +40,10 @@ rules:
   resources: ["roles", "rolebindings"]
   # update: ensureBuilderRBAC converges pre-existing same-named Role /
   # RoleBinding back onto the enforced shape instead of trusting them.
-  verbs: ["get", "create", "update"]
+  # list/watch: that convergence Get goes through the cached client, whose
+  # informer cannot sync without them (the reconcile would stall forever on
+  # every re-reconcile once the Role exists).
+  verbs: ["get", "list", "watch", "create", "update"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "patch", "update"]

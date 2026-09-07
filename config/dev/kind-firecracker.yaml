@@ -23,6 +23,14 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: firecracker
+# Docker Hub is unreachable from this host (registry-1.docker.io blocked), and
+# the node containerd does not read the host docker daemon registry-mirrors:
+# patch the docker.io mirror in so in-cluster pulls (installer curl/alpine)
+# resolve. Drop this block on hosts with direct Docker Hub access.
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+    endpoint = ["https://docker.m.daocloud.io", "https://docker.1ms.run", "https://docker.jiaxin.site"]
 nodes:
 - role: control-plane
   extraMounts:
